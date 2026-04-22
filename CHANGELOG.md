@@ -19,6 +19,21 @@
 ### Fixed
 - 待補充
 
+## [v0.2.0] - 2026-04-22
+
+### Added
+- 支援 Linux 啟動腳本 `run.sh`。
+- 新增 `systemd` 範例檔 `stock-journal.service.example`。
+- 新增 Linux 實際部署指南 `docs/linux-deployment.md`。
+
+### Changed
+- `server.py` 支援以環境變數設定 `STOCK_APP_HOST` 與 `STOCK_APP_PORT`。
+- README 補充 Windows / Linux 雙平台啟動說明與 Linux 常駐執行說明。
+
+### Fixed
+- 修正 WSL / 舊版 Python 環境缺少 `zoneinfo` 模組時無法啟動的問題。
+- 移除 `str.removeprefix()` 依賴，提升較舊 Python 版本相容性。
+
 ## [v0.1.0] - 2026-04-22
 
 ### Added

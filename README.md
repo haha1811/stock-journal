@@ -8,6 +8,12 @@
 
 交易資料不再只存在瀏覽器，而是寫入本機資料庫 `data/stock-records.sqlite3`。
 
+## 執行環境
+
+- Python：建議 `3.11+`
+- 作業系統：`Windows`、`Linux`
+- 主要依賴：Python 標準函式庫（目前不需額外安裝第三方套件）
+
 ## 目前功能
 
 - 新增 / 編輯 / 刪除買賣交易
@@ -79,6 +85,8 @@
 
 ## 啟動方式
 
+### Windows
+
 1. 進入專案資料夾：
 
 ```powershell
@@ -97,6 +105,48 @@ python server.py
 http://127.0.0.1:8000
 ```
 
+### Linux
+
+1. 進入專案資料夾：
+
+```bash
+cd /opt/stock-journal
+```
+
+2. 啟動後端服務：
+
+```bash
+python3 server.py
+```
+
+或使用內建啟動腳本：
+
+```bash
+chmod +x run.sh
+./run.sh
+```
+
+3. 開啟瀏覽器進入：
+
+```text
+http://127.0.0.1:8000
+```
+
+若要讓同網段其他裝置可連線，可改用：
+
+```bash
+STOCK_APP_HOST=0.0.0.0 STOCK_APP_PORT=8000 python3 server.py
+```
+
+## 環境變數
+
+- `STOCK_APP_HOST`
+  - 預設：`127.0.0.1`
+  - 範例：`0.0.0.0`
+- `STOCK_APP_PORT`
+  - 預設：`8000`
+  - 範例：`8080`
+
 ## API 概念
 
 - `GET /api/trades`：讀取全部交易
@@ -108,6 +158,18 @@ http://127.0.0.1:8000
 ## 資料庫位置
 
 - SQLite 檔案：`data/stock-records.sqlite3`
+
+## Linux 常駐執行
+
+- 已提供 `stock-journal.service.example`
+- 可放到 `/etc/systemd/system/stock-journal.service`
+- 再依你的 Linux 帳號、專案路徑調整：
+  - `WorkingDirectory`
+  - `ExecStart`
+  - `User`
+  - `Group`
+- 實際部署步驟可參考：
+  - [docs/linux-deployment.md](./docs/linux-deployment.md)
 
 ## 後續可再擴充
 

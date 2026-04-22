@@ -1,25 +1,30 @@
 import json
 import mimetypes
+import os
 import sqlite3
 import threading
 import traceback
 import urllib.error
 import urllib.parse
 import urllib.request
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from html.parser import HTMLParser
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
-from zoneinfo import ZoneInfo
+
+try:
+    from zoneinfo import ZoneInfo
+except ImportError:
+    ZoneInfo = None
 
 
 BASE_DIR = Path(__file__).resolve().parent
 DB_PATH = BASE_DIR / "data" / "stock-records.sqlite3"
 HOST = "127.0.0.1"
 PORT = 8000
-TAIPEI_TZ = ZoneInfo("Asia/Taipei")
+TAIPEI_TZ = ZoneInfo("Asia/Taipei") if ZoneInfo else timezone(timedelta(hours=8), name="Asia/Taipei")
 PRICE_REFRESH_HOUR = 15
 DIVIDEND_REFRESH_HOUR = 6
 STATIC_FILES = {
@@ -37,6 +42,25 @@ STATIC_FILES = {
     "/inventory.js": "inventory.js",
     "/styles.css": "styles.css",
 }
+
+
+def get_env_host():
+    return os.getenv("STOCK_APP_HOST", HOST).strip() or HOST
+
+
+def get_env_port():
+    raw = os.getenv("STOCK_APP_PORT", str(PORT)).strip()
+    try:
+        port = int(raw)
+    except ValueError as error:
+        raise ValueError("STOCK_APP_PORT 必須是整數") from error
+    if port <= 0 or port > 65535:
+        raise ValueError("STOCK_APP_PORT 必須介於 1 到 65535")
+    return port
+
+
+def strip_prefix(value, prefix):
+    return value[len(prefix):] if value.startswith(prefix) else value
 
 
 def ensure_database():
@@ -1658,19 +1682,19 @@ class StockRequestHandler(BaseHTTPRequestHandler):
             payload = self.read_json_body()
 
             if parsed.path.startswith("/api/trades/"):
-                trade_id = parsed.path.removeprefix("/api/trades/")
+                trade_id = strip_prefix(parsed.path, "/api/trades/")
                 trade = update_trade(trade_id, payload)
                 self.send_json({"item": trade})
                 return
 
             if parsed.path.startswith("/api/accounts/"):
-                account_id = parsed.path.removeprefix("/api/accounts/")
+                account_id = strip_prefix(parsed.path, "/api/accounts/")
                 account = update_account(account_id, payload)
                 self.send_json({"item": account})
                 return
 
             if parsed.path.startswith("/api/dividends/manual/"):
-                event_id = parsed.path.removeprefix("/api/dividends/manual/")
+                event_id = strip_prefix(parsed.path, "/api/dividends/manual/")
                 item = update_manual_dividend_event(event_id, payload)
                 self.send_json({"item": item})
                 return
@@ -1686,19 +1710,19 @@ class StockRequestHandler(BaseHTTPRequestHandler):
 
         try:
             if parsed.path.startswith("/api/trades/"):
-                trade_id = parsed.path.removeprefix("/api/trades/")
+                trade_id = strip_prefix(parsed.path, "/api/trades/")
                 delete_trade(trade_id)
                 self.send_json({"deleted": True})
                 return
 
             if parsed.path.startswith("/api/accounts/"):
-                account_id = parsed.path.removeprefix("/api/accounts/")
+                account_id = strip_prefix(parsed.path, "/api/accounts/")
                 delete_account(account_id)
                 self.send_json({"deleted": True})
                 return
 
             if parsed.path.startswith("/api/dividends/manual/"):
-                event_id = parsed.path.removeprefix("/api/dividends/manual/")
+                event_id = strip_prefix(parsed.path, "/api/dividends/manual/")
                 delete_manual_dividend_event(event_id)
                 self.send_json({"deleted": True})
                 return
@@ -1754,8 +1778,10 @@ def run():
     dividend_startup_refresh.start()
     dividend_scheduler = threading.Thread(target=scheduled_dividend_refresh_loop, daemon=True)
     dividend_scheduler.start()
-    server = ThreadingHTTPServer((HOST, PORT), StockRequestHandler)
-    print(f"Stock app running at http://{HOST}:{PORT}")
+    host = get_env_host()
+    port = get_env_port()
+    server = ThreadingHTTPServer((host, port), StockRequestHandler)
+    print(f"Stock app running at http://{host}:{port}")
     server.serve_forever()
 
 
