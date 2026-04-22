@@ -168,6 +168,8 @@ STOCK_APP_HOST=0.0.0.0 STOCK_APP_PORT=8000 python3 server.py
   - `ExecStart`
   - `User`
   - `Group`
+- 實際部署步驟可參考：
+  - [docs/linux-deployment.md](./docs/linux-deployment.md)
 
 ## 後續可再擴充
 
