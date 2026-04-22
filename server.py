@@ -1,5 +1,6 @@
 import json
 import mimetypes
+import os
 import sqlite3
 import threading
 import traceback
@@ -37,6 +38,21 @@ STATIC_FILES = {
     "/inventory.js": "inventory.js",
     "/styles.css": "styles.css",
 }
+
+
+def get_env_host():
+    return os.getenv("STOCK_APP_HOST", HOST).strip() or HOST
+
+
+def get_env_port():
+    raw = os.getenv("STOCK_APP_PORT", str(PORT)).strip()
+    try:
+        port = int(raw)
+    except ValueError as error:
+        raise ValueError("STOCK_APP_PORT 必須是整數") from error
+    if port <= 0 or port > 65535:
+        raise ValueError("STOCK_APP_PORT 必須介於 1 到 65535")
+    return port
 
 
 def ensure_database():
@@ -1754,8 +1770,10 @@ def run():
     dividend_startup_refresh.start()
     dividend_scheduler = threading.Thread(target=scheduled_dividend_refresh_loop, daemon=True)
     dividend_scheduler.start()
-    server = ThreadingHTTPServer((HOST, PORT), StockRequestHandler)
-    print(f"Stock app running at http://{HOST}:{PORT}")
+    host = get_env_host()
+    port = get_env_port()
+    server = ThreadingHTTPServer((host, port), StockRequestHandler)
+    print(f"Stock app running at http://{host}:{port}")
     server.serve_forever()
 
 

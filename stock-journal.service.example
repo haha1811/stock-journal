@@ -1,0 +1,17 @@
+[Unit]
+Description=Stock Journal Web App
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/stock-journal
+Environment=STOCK_APP_HOST=0.0.0.0
+Environment=STOCK_APP_PORT=8000
+ExecStart=/usr/bin/python3 /opt/stock-journal/server.py
+Restart=always
+RestartSec=5
+User=stockjournal
+Group=stockjournal
+
+[Install]
+WantedBy=multi-user.target
