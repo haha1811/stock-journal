@@ -11,7 +11,7 @@
 ## [Unreleased]
 
 ### Added
-- Linux 部署指南文件草稿。
+- 待補充
 
 ### Changed
 - 待補充
@@ -19,7 +19,7 @@
 ### Fixed
 - 待補充
 
-## [v0.2.0] - Draft
+## [v0.2.0] - 2026-04-22
 
 ### Added
 - 支援 Linux 啟動腳本 `run.sh`。
