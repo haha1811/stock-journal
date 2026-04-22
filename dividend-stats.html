@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>股利統計頁</title>
+  <link rel="icon" href="/favicon.ico" sizes="any">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="page-shell">
+    <header class="hero">
+      <div>
+        <p class="eyebrow">Dividend Analytics</p>
+        <h1>股利統計</h1>
+        <p class="hero-copy">
+          以年為單位彙總每檔股票的殖利率與實領股利，方便快速看出高配息標的。
+        </p>
+      </div>
+      <div class="hero-actions">
+        <a class="secondary-button nav-link" href="/index.html">交易頁</a>
+        <a class="secondary-button nav-link" href="/inventory.html">庫存頁</a>
+        <a class="secondary-button nav-link" href="/dividends.html">股利頁</a>
+        <a class="secondary-button nav-link" href="/dividend-calendar.html">股利月曆</a>
+      </div>
+    </header>
+
+    <main class="inventory-layout">
+      <section class="panel panel-summary">
+        <div class="panel-header">
+          <h2>統計總覽</h2>
+          <p>預設顯示今年資料，也可手動勾選多個年份做加總比較。</p>
+        </div>
+
+        <div id="stats-notice" class="page-notice" hidden></div>
+
+        <section class="stats-filter-panel">
+          <div class="stats-filter-grid">
+            <label>
+              <span>帳戶切換</span>
+              <select id="stats-account-filter">
+                <option value="ALL">全部帳戶</option>
+              </select>
+            </label>
+
+            <label>
+              <span>高亮門檻 (%)</span>
+              <div class="percent-input-wrap">
+                <input id="yield-threshold-input" type="number" min="0" step="0.1" value="6">
+                <span>%</span>
+              </div>
+            </label>
+          </div>
+
+          <div class="year-selector-panel">
+            <div class="year-selector-header">
+              <span class="mini-label">年份篩選</span>
+              <label class="year-select-all">
+                <input id="stats-year-select-all" type="checkbox">
+                <span>全選</span>
+              </label>
+            </div>
+            <div id="stats-year-options" class="year-option-list"></div>
+          </div>
+        </section>
+
+        <div class="summary-grid">
+          <article class="summary-card warm">
+            <span>選取年份</span>
+            <strong id="stats-selected-years">-</strong>
+          </article>
+          <article class="summary-card cool">
+            <span>統計個股數</span>
+            <strong id="stats-stock-count">0</strong>
+          </article>
+          <article class="summary-card accent">
+            <span>實領股利加總</span>
+            <strong id="stats-net-total">0</strong>
+          </article>
+          <article class="summary-card neutral">
+            <span>超過門檻個股</span>
+            <strong id="stats-above-threshold">0</strong>
+          </article>
+        </div>
+
+        <div class="table-wrap">
+          <table class="inventory-table">
+            <thead>
+              <tr>
+                <th class="sortable-header" data-sort="account">帳戶</th>
+                <th class="sortable-header" data-sort="symbol">股號</th>
+                <th class="sortable-header" data-sort="name">股名</th>
+                <th class="sortable-header" data-sort="year_count">選取年數</th>
+                <th class="sortable-header" data-sort="record_count">股利筆數</th>
+                <th class="sortable-header" data-sort="yield_total">殖利率加總</th>
+                <th class="sortable-header" data-sort="net_total">股利金額加總</th>
+              </tr>
+            </thead>
+            <tbody id="stats-table-body"></tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <template id="stats-row-template">
+    <tr>
+      <td data-key="account"></td>
+      <td data-key="symbol"></td>
+      <td data-key="name"></td>
+      <td data-key="year_count"></td>
+      <td data-key="record_count"></td>
+      <td data-key="yield_total"></td>
+      <td data-key="net_total"></td>
+    </tr>
+  </template>
+
+  <script src="dividend-stats.js"></script>
+</body>
+</html>

@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>股利月曆頁</title>
+  <link rel="icon" href="/favicon.ico" sizes="any">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="page-shell">
+    <header class="hero">
+      <div>
+        <p class="eyebrow">Dividend Calendar</p>
+        <h1>股利月曆</h1>
+        <p class="hero-copy">
+          以單一年份查看每檔個股在各月份可以領到的實領股利分布，方便規劃每月現金流。
+        </p>
+      </div>
+      <div class="hero-actions">
+        <a class="secondary-button nav-link" href="/index.html">交易頁</a>
+        <a class="secondary-button nav-link" href="/inventory.html">庫存頁</a>
+        <a class="secondary-button nav-link" href="/dividends.html">股利頁</a>
+        <a class="secondary-button nav-link" href="/dividend-stats.html">股利統計</a>
+      </div>
+    </header>
+
+    <main class="inventory-layout">
+      <section class="panel panel-summary">
+        <div class="panel-header">
+          <h2>年度月分布</h2>
+          <p>月份以股利發放日為準，金額使用股利頁中的實領。</p>
+        </div>
+
+        <div id="calendar-notice" class="page-notice" hidden></div>
+
+        <section class="stats-filter-panel">
+          <div class="calendar-filter-grid">
+            <label>
+              <span>帳戶切換</span>
+              <select id="calendar-account-filter">
+                <option value="ALL">全部帳戶</option>
+              </select>
+            </label>
+
+            <label>
+              <span>年份</span>
+              <select id="calendar-year-filter"></select>
+            </label>
+
+            <label class="bulk-target-checkbox calendar-toggle">
+              <input id="calendar-hide-zero" type="checkbox" checked>
+              <span>隱藏全年為 0 的個股</span>
+            </label>
+          </div>
+        </section>
+
+        <div class="summary-grid">
+          <article class="summary-card warm">
+            <span>年度</span>
+            <strong id="calendar-selected-year">-</strong>
+          </article>
+          <article class="summary-card cool">
+            <span>個股數</span>
+            <strong id="calendar-stock-count">0</strong>
+          </article>
+          <article class="summary-card accent">
+            <span>年度實領總計</span>
+            <strong id="calendar-year-total">0</strong>
+          </article>
+          <article class="summary-card neutral">
+            <span>最高月份</span>
+            <strong id="calendar-peak-month">-</strong>
+          </article>
+        </div>
+
+        <div class="table-wrap">
+          <table class="inventory-table calendar-table">
+            <thead>
+              <tr>
+                <th>帳戶</th>
+                <th>股號</th>
+                <th>股名</th>
+                <th>1</th>
+                <th>2</th>
+                <th>3</th>
+                <th>4</th>
+                <th>5</th>
+                <th>6</th>
+                <th>7</th>
+                <th>8</th>
+                <th>9</th>
+                <th>10</th>
+                <th>11</th>
+                <th>12</th>
+                <th>總計</th>
+              </tr>
+            </thead>
+            <tbody id="calendar-table-body"></tbody>
+            <tfoot>
+              <tr id="calendar-total-row" class="calendar-total-row">
+                <td colspan="3">總計</td>
+                <td data-month="1">0</td>
+                <td data-month="2">0</td>
+                <td data-month="3">0</td>
+                <td data-month="4">0</td>
+                <td data-month="5">0</td>
+                <td data-month="6">0</td>
+                <td data-month="7">0</td>
+                <td data-month="8">0</td>
+                <td data-month="9">0</td>
+                <td data-month="10">0</td>
+                <td data-month="11">0</td>
+                <td data-month="12">0</td>
+                <td data-total="year">0</td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <template id="calendar-row-template">
+    <tr>
+      <td data-key="account"></td>
+      <td data-key="symbol"></td>
+      <td data-key="name"></td>
+      <td data-month="1"></td>
+      <td data-month="2"></td>
+      <td data-month="3"></td>
+      <td data-month="4"></td>
+      <td data-month="5"></td>
+      <td data-month="6"></td>
+      <td data-month="7"></td>
+      <td data-month="8"></td>
+      <td data-month="9"></td>
+      <td data-month="10"></td>
+      <td data-month="11"></td>
+      <td data-month="12"></td>
+      <td data-key="total"></td>
+    </tr>
+  </template>
+
+  <script src="dividend-calendar.js"></script>
+</body>
+</html>

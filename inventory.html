@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>股票庫存頁</title>
+  <link rel="icon" href="/favicon.ico" sizes="any">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="page-shell">
+    <header class="hero">
+      <div>
+        <p class="eyebrow">Portfolio Inventory</p>
+        <h1>庫存頁</h1>
+        <p class="hero-copy">
+          這裡顯示目前仍持有的庫存、最新更新價、預估損益與可賣價提醒。
+        </p>
+      </div>
+      <div class="hero-actions">
+        <a class="secondary-button nav-link" href="/index.html">交易頁</a>
+        <a class="secondary-button nav-link" href="/dividends.html">股利頁</a>
+        <a class="secondary-button nav-link" href="/dividend-stats.html">股利統計</a>
+        <a class="secondary-button nav-link" href="/dividend-calendar.html">股利月曆</a>
+        <button id="refresh-price-button" class="secondary-button" type="button">手動更新股價</button>
+      </div>
+    </header>
+
+    <main class="inventory-layout">
+      <section class="panel panel-summary">
+        <div class="panel-header">
+          <h2>庫存總覽</h2>
+          <p>股價欄位採用盤後公開資料，每天 15:00 後自動更新，亦可手動刷新。</p>
+        </div>
+
+        <div class="summary-grid">
+          <article class="summary-card warm">
+            <span>庫存成本</span>
+            <strong id="inventory-cost-total">0</strong>
+          </article>
+          <article class="summary-card cool">
+            <span>市值</span>
+            <strong id="market-value-total">0</strong>
+          </article>
+          <article class="summary-card accent">
+            <span>未實現損益</span>
+            <strong id="unrealized-profit-total">0</strong>
+          </article>
+          <article class="summary-card neutral">
+            <span>達到可賣價</span>
+            <strong id="ready-sell-count">0</strong>
+          </article>
+        </div>
+
+        <div class="inventory-toolbar">
+          <label>
+            <span>帳戶切換</span>
+            <select id="inventory-account-filter">
+              <option value="ALL">全部帳戶</option>
+            </select>
+          </label>
+          <div class="price-status">
+            <span class="mini-label">最近更新</span>
+            <strong id="quote-status-text">尚未更新</strong>
+          </div>
+        </div>
+
+        <section class="bulk-target-panel">
+          <div class="bulk-target-copy">
+            <span class="mini-label">批次可賣價</span>
+            <strong>一鍵套用目前篩選中的庫存</strong>
+            <p>輸入百分比後，系統會依「平均價 × 百分比」批次更新可賣價。</p>
+          </div>
+          <div class="bulk-target-controls">
+            <label class="bulk-target-field">
+              <span>可賣價百分比</span>
+              <div class="percent-input-wrap">
+                <input id="bulk-target-percentage" type="number" min="1" step="0.1" value="120">
+                <span>%</span>
+              </div>
+            </label>
+            <label class="bulk-target-checkbox">
+              <input id="bulk-target-empty-only" type="checkbox" checked>
+              <span>只套用尚未設定可賣價的股票</span>
+            </label>
+            <button id="apply-bulk-target-button" class="bulk-apply-button" type="button">套用全部可賣價</button>
+          </div>
+        </section>
+
+        <div class="table-wrap">
+          <table class="inventory-table">
+            <thead>
+              <tr>
+                <th>帳戶</th>
+                <th>股號</th>
+                <th>股名</th>
+                <th>庫存數量(股)</th>
+                <th>平均價(股)</th>
+                <th>庫存成本</th>
+                <th>最新更新價</th>
+                <th>市值</th>
+                <th>未實現損益</th>
+                <th>未實現報酬</th>
+                <th>可賣價</th>
+                <th>備註</th>
+                <th>操作</th>
+              </tr>
+            </thead>
+            <tbody id="inventory-table-body"></tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <template id="inventory-row-template">
+    <tr>
+      <td data-key="account"></td>
+      <td data-key="symbol"></td>
+      <td data-key="name"></td>
+      <td data-key="quantity"></td>
+      <td data-key="avg_price"></td>
+      <td data-key="inventory_cost"></td>
+      <td data-key="latest_price"></td>
+      <td data-key="market_value"></td>
+      <td data-key="unrealized_profit"></td>
+      <td data-key="unrealized_profit_pct"></td>
+      <td>
+        <input class="target-input" type="number" min="0" step="0.01" placeholder="可賣價">
+      </td>
+      <td>
+        <input class="note-input" type="text" maxlength="80" placeholder="備註">
+      </td>
+      <td>
+        <button class="inventory-save fancy-save-button" type="button">
+          <span>儲存</span>
+        </button>
+      </td>
+    </tr>
+  </template>
+
+  <script src="inventory.js"></script>
+</body>
+</html>

@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>股票股利頁</title>
+  <link rel="icon" href="/favicon.ico" sizes="any">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="page-shell">
+    <header class="hero">
+      <div>
+        <p class="eyebrow">Dividend Records</p>
+        <h1>股利頁</h1>
+        <p class="hero-copy">
+          顯示目前持有 ETF 的股利記錄、預估金額與跨行扣款後實領。
+        </p>
+      </div>
+      <div class="hero-actions">
+        <a class="secondary-button nav-link" href="/index.html">交易頁</a>
+        <a class="secondary-button nav-link" href="/inventory.html">庫存頁</a>
+        <a class="secondary-button nav-link" href="/dividend-stats.html">股利統計</a>
+        <a class="secondary-button nav-link" href="/dividend-calendar.html">股利月曆</a>
+        <button id="refresh-dividend-button" class="secondary-button" type="button">手動更新股利</button>
+      </div>
+    </header>
+
+    <main class="inventory-layout">
+      <section class="panel panel-summary">
+        <div class="panel-header">
+          <h2>股利總覽</h2>
+          <p>目前同步來源為 TWSE 公開 ETF 配息清單。未到除息日前，官方公告若變更，系統每日同步時會更新資料。</p>
+        </div>
+
+        <section class="manual-dividend-panel">
+          <div class="manual-dividend-header">
+            <div>
+              <span class="mini-label">手動維護</span>
+              <strong id="manual-dividend-title">新增歷史股利</strong>
+              <p>可補以前已發放的股利資料，也可修改或刪除手動建立的記錄。</p>
+            </div>
+          </div>
+
+          <form id="manual-dividend-form" class="manual-dividend-form">
+            <label>
+              <span>帳戶</span>
+              <select id="manual-account" required>
+                <option value="主帳戶">主帳戶</option>
+              </select>
+            </label>
+            <label>
+              <span>股號</span>
+              <input id="manual-symbol" type="text" maxlength="10" placeholder="0056" required>
+            </label>
+            <label>
+              <span>股名</span>
+              <input id="manual-name" type="text" maxlength="40" placeholder="元大高股息" required>
+            </label>
+            <label>
+              <span>除息日</span>
+              <input id="manual-ex-date" type="date" required>
+            </label>
+            <label>
+              <span>發放日</span>
+              <input id="manual-payment-date" type="date" required>
+            </label>
+            <label>
+              <span>單位數</span>
+              <input id="manual-eligible-units" type="number" min="0" step="1" placeholder="2000">
+            </label>
+            <label>
+              <span>金額(股)</span>
+              <input id="manual-dividend-per-unit" type="number" min="0" step="0.001" placeholder="1.000" required>
+            </label>
+            <label>
+              <span>股價</span>
+              <input id="manual-avg-price" type="number" min="0" step="0.01" placeholder="38.21">
+            </label>
+            <label>
+              <span>殖利率(%)</span>
+              <input id="manual-yield-rate" type="number" min="0" step="0.01" placeholder="2.62">
+            </label>
+            <div class="manual-dividend-actions">
+              <button id="manual-dividend-submit" class="primary-button" type="submit">新增股利</button>
+              <button id="manual-dividend-reset" class="ghost-button" type="button">清空</button>
+            </div>
+          </form>
+        </section>
+
+        <div class="dividend-toolbar">
+          <label>
+            <span>帳戶切換</span>
+            <select id="dividend-account-filter">
+              <option value="ALL">全部帳戶</option>
+            </select>
+          </label>
+          <div class="price-status">
+            <span class="mini-label">同步說明</span>
+            <strong id="dividend-status-text">每日同步一次，可手動刷新</strong>
+          </div>
+        </div>
+
+        <div id="dividend-notice" class="page-notice" hidden></div>
+
+        <div class="table-wrap">
+          <table class="inventory-table">
+            <thead>
+              <tr>
+                <th class="sortable-header" data-sort="account">帳戶</th>
+                <th class="sortable-header" data-sort="ex_dividend_date">除息日</th>
+                <th class="sortable-header" data-sort="payment_date">發放日</th>
+                <th class="sortable-header" data-sort="year">年</th>
+                <th class="sortable-header" data-sort="month">月</th>
+                <th class="sortable-header" data-sort="symbol">股號</th>
+                <th class="sortable-header" data-sort="name">股名</th>
+                <th class="sortable-header" data-sort="eligible_units">單位數</th>
+                <th class="sortable-header" data-sort="avg_price">股價</th>
+                <th class="sortable-header" data-sort="cash_dividend_per_unit">金額(股)</th>
+                <th class="sortable-header" data-sort="yield_rate">殖利率</th>
+                <th class="sortable-header" data-sort="gross_amount">金額(合計)</th>
+                <th class="sortable-header" data-sort="bank_fee">跨行扣款</th>
+                <th class="sortable-header" data-sort="net_amount">實領</th>
+                <th class="sortable-header" data-sort="source">來源</th>
+                <th>操作</th>
+              </tr>
+            </thead>
+            <tbody id="dividend-table-body"></tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <template id="dividend-row-template">
+    <tr>
+      <td data-key="account"></td>
+      <td data-key="ex_dividend_date"></td>
+      <td data-key="payment_date"></td>
+      <td data-key="year"></td>
+      <td data-key="month"></td>
+      <td data-key="symbol"></td>
+      <td data-key="name"></td>
+      <td data-key="eligible_units"></td>
+      <td data-key="avg_price"></td>
+      <td data-key="cash_dividend_per_unit"></td>
+      <td data-key="yield_rate"></td>
+      <td data-key="gross_amount"></td>
+      <td>
+        <input class="bank-fee-input" type="number" min="0" step="1" placeholder="扣款">
+      </td>
+      <td data-key="net_amount"></td>
+      <td data-key="source"></td>
+      <td>
+        <button class="dividend-save fancy-save-button" type="button"><span>儲存</span></button>
+        <button class="dividend-edit row-edit" type="button" hidden>編輯</button>
+        <button class="dividend-delete row-delete" type="button" hidden>刪除</button>
+      </td>
+    </tr>
+  </template>
+
+  <script src="dividends.js"></script>
+</body>
+</html>

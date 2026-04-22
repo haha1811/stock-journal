@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>股票交易紀錄</title>
+  <link rel="icon" href="/favicon.ico" sizes="any">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="page-shell">
+    <header class="hero">
+      <div>
+        <p class="eyebrow">Personal Stock Log</p>
+        <h1>股票買賣紀錄台</h1>
+        <p class="hero-copy">
+          把原本 Excel 的買入、賣出、手續費與交易稅，整理成比較順手的自用介面。
+        </p>
+      </div>
+      <div class="hero-actions">
+        <a class="secondary-button nav-link" href="/inventory.html">庫存頁</a>
+        <a class="secondary-button nav-link" href="/dividends.html">股利頁</a>
+        <a class="secondary-button nav-link" href="/dividend-stats.html">股利統計</a>
+        <a class="secondary-button nav-link" href="/dividend-calendar.html">股利月曆</a>
+        <button id="toggle-account-panel" class="secondary-button" type="button">帳戶管理</button>
+        <button id="export-button" class="secondary-button" type="button">匯出 JSON</button>
+        <label class="secondary-button upload-button" for="import-file">匯入 JSON</label>
+        <input id="import-file" type="file" accept="application/json">
+      </div>
+    </header>
+
+    <main class="layout">
+      <section class="panel panel-form">
+        <div class="panel-header">
+          <h2 id="form-title">新增交易</h2>
+          <p id="form-description">輸入一次後會自動儲存在瀏覽器。</p>
+        </div>
+
+        <div id="editing-banner" class="editing-banner" hidden>
+          <span id="editing-banner-text">目前正在編輯交易資料</span>
+          <button id="cancel-edit-button" class="ghost-button" type="button">取消編輯</button>
+        </div>
+
+        <form id="trade-form" class="trade-form">
+          <div class="field-grid">
+            <label>
+              <span>帳戶</span>
+              <select id="account" name="account"></select>
+            </label>
+
+            <label>
+              <span>T+2</span>
+              <select id="settlement" name="settlement">
+                <option value="Y">Y</option>
+                <option value="N">N</option>
+              </select>
+            </label>
+
+            <label>
+              <span>買賣</span>
+              <select id="side" name="side">
+                <option value="買入">買入</option>
+                <option value="賣出">賣出</option>
+              </select>
+            </label>
+
+            <label>
+              <span>日期</span>
+              <input id="date" name="date" type="date" required>
+            </label>
+
+            <label>
+              <span>股票代號</span>
+              <input id="symbol" name="symbol" type="text" maxlength="10" placeholder="0052" required>
+            </label>
+
+            <label>
+              <span>股票名稱</span>
+              <input id="name" name="name" type="text" placeholder="富邦科技" required>
+            </label>
+
+            <label>
+              <span>數量(股)</span>
+              <input id="quantity" name="quantity" type="number" min="1" step="1" value="1000" required>
+            </label>
+
+            <label>
+              <span>價格(股)</span>
+              <input id="price" name="price" type="number" min="0" step="0.01" required>
+            </label>
+
+            <label>
+              <span>手續費</span>
+              <input id="fee" name="fee" type="number" min="0" step="1" value="0">
+            </label>
+
+            <label>
+              <span>交易稅</span>
+              <input id="tax" name="tax" type="number" min="0" step="1" value="0">
+            </label>
+
+            <label class="full-width">
+              <span>備註</span>
+              <input id="note" name="note" type="text" placeholder="例如：折讓 80，實收 19">
+            </label>
+          </div>
+
+          <div class="calculator-strip">
+            <div>
+              <span class="mini-label">成交金額</span>
+              <strong id="preview-amount">0</strong>
+            </div>
+            <div>
+              <span class="mini-label">自動交易稅</span>
+              <strong id="preview-tax">0</strong>
+            </div>
+            <div>
+              <span class="mini-label">淨現金流</span>
+              <strong id="preview-cashflow">0</strong>
+            </div>
+          </div>
+
+          <div class="form-actions">
+            <button id="submit-button" class="primary-button" type="submit">儲存交易</button>
+            <button id="reset-button" class="ghost-button" type="button">清空</button>
+          </div>
+        </form>
+      </section>
+
+      <section class="panel panel-summary">
+        <div class="panel-header">
+          <h2>總覽</h2>
+          <p>依目前表格資料即時計算。</p>
+        </div>
+
+        <section id="account-panel" class="account-panel" hidden>
+          <div class="account-panel-header">
+            <div>
+              <h3>帳戶管理</h3>
+              <p>新增、改名或整理你的券商 / 帳戶清單。</p>
+            </div>
+            <button id="close-account-panel" class="ghost-button" type="button">關閉</button>
+          </div>
+
+          <form id="account-form" class="account-form">
+            <label class="account-form-field">
+              <span id="account-form-label">新增帳戶</span>
+              <input id="account-name-input" name="accountName" type="text" maxlength="30" placeholder="例如：玉山證券">
+            </label>
+            <div class="account-form-actions">
+              <button id="account-submit-button" class="primary-button" type="submit">新增帳戶</button>
+              <button id="account-reset-button" class="ghost-button" type="button">清空</button>
+            </div>
+          </form>
+
+          <div class="account-list-wrap">
+            <table class="account-table">
+              <thead>
+                <tr>
+                  <th>帳戶名稱</th>
+                  <th>操作</th>
+                </tr>
+              </thead>
+              <tbody id="account-table-body"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <div class="summary-grid">
+          <article class="summary-card warm">
+            <span>買入總額</span>
+            <strong id="buy-total">0</strong>
+          </article>
+          <article class="summary-card cool">
+            <span>賣出總額</span>
+            <strong id="sell-total">0</strong>
+          </article>
+          <article class="summary-card accent">
+            <span>買賣差</span>
+            <strong id="net-total">0</strong>
+          </article>
+          <article class="summary-card neutral">
+            <span>手續費 + 交易稅</span>
+            <strong id="cost-total">0</strong>
+          </article>
+        </div>
+
+        <div class="filter-bar">
+          <label>
+            <span>帳戶切換</span>
+            <select id="account-filter">
+              <option value="ALL">全部帳戶</option>
+            </select>
+          </label>
+          <label>
+            <span>年份</span>
+            <select id="year-filter">
+              <option value="ALL">全部</option>
+            </select>
+          </label>
+          <label>
+            <span>股票代號 / 名稱</span>
+            <input id="search-input" type="search" placeholder="輸入 0056 或 元大高股息">
+          </label>
+        </div>
+
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>No</th>
+                <th class="sortable-header" data-sort="settlement">T+2</th>
+                <th class="sortable-header" data-sort="side">買賣</th>
+                <th class="sortable-header" data-sort="date">日期</th>
+                <th class="sortable-header" data-sort="year">年</th>
+                <th class="sortable-header" data-sort="account">帳戶</th>
+                <th class="sortable-header" data-sort="symbol">股號</th>
+                <th class="sortable-header" data-sort="name">股名</th>
+                <th class="sortable-header" data-sort="quantity">數量(股)</th>
+                <th class="sortable-header" data-sort="price">價格(股)</th>
+                <th class="sortable-header" data-sort="amount">費用</th>
+                <th class="sortable-header" data-sort="fee">手續費</th>
+                <th class="sortable-header" data-sort="tax">交易稅</th>
+                <th class="sortable-header" data-sort="note">備註</th>
+                <th>操作</th>
+              </tr>
+            </thead>
+            <tbody id="trade-table-body"></tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <template id="table-row-template">
+    <tr>
+      <td data-key="index"></td>
+      <td data-key="settlement"></td>
+      <td data-key="side"></td>
+      <td data-key="date"></td>
+      <td data-key="year"></td>
+      <td data-key="account"></td>
+      <td data-key="symbol"></td>
+      <td data-key="name"></td>
+      <td data-key="quantity"></td>
+      <td data-key="price"></td>
+      <td data-key="amount"></td>
+      <td data-key="fee"></td>
+      <td data-key="tax"></td>
+      <td data-key="note"></td>
+      <td>
+        <button class="row-edit" type="button">編輯</button>
+        <button class="row-delete" type="button">刪除</button>
+      </td>
+    </tr>
+  </template>
+
+  <template id="account-row-template">
+    <tr>
+      <td data-key="name"></td>
+      <td>
+        <button class="account-edit" type="button">編輯</button>
+        <button class="account-delete" type="button">刪除</button>
+      </td>
+    </tr>
+  </template>
+
+  <script src="app.js"></script>
+</body>
+</html>
