@@ -90,8 +90,8 @@ class AuthTestCase(unittest.TestCase):
         self.assertFalse(server.requires_authentication("/api/auth/google"))
         self.assertFalse(server.requires_authentication("/login.html"))
         self.assertTrue(server.requires_authentication("/api/trades"))
-        self.assertTrue(server.requires_authentication("/"))
-        self.assertTrue(server.requires_authentication("/index.html"))
+        self.assertFalse(server.requires_authentication("/"))
+        self.assertFalse(server.requires_authentication("/index.html"))
 
     def test_http_requests_require_login_and_google_login_sets_cookie(self):
         original_verify = server.verify_google_identity
@@ -126,7 +126,7 @@ class AuthTestCase(unittest.TestCase):
         login_html = response.read().decode("utf-8")
         self.assertIn("Log in with Google", login_html)
         self.assertIn("google-login-button", login_html)
-        self.assertIn('href="/api/auth/google/start"', login_html)
+        self.assertIn('href="#"', login_html)
         self.assertNotIn("auth-status", login_html)
         self.assertNotIn("尚未設定 GOOGLE_CLIENT_ID", login_html)
         self.assertNotIn("disabled", login_html)
@@ -256,6 +256,39 @@ class AuthTestCase(unittest.TestCase):
         payload = json.loads(response.read().decode("utf-8"))
         self.assertEqual(payload["user"]["email"], "oauth-user@example.com")
         self.assertEqual(payload["user"]["name"], "OAuth User")
+
+    def test_bearer_token_auth_is_accepted_for_protected_api(self):
+        original_verify_firebase = server.verify_firebase_id_token
+        server.verify_firebase_id_token = lambda token: {
+            "uid": "firebase-user-1",
+            "email": "firebase-user@example.com",
+            "email_verified": True,
+            "name": "Firebase User",
+            "picture": "https://example.com/avatar.png",
+        } if token == "valid-firebase-token" else None
+        self.addCleanup(lambda: setattr(server, "verify_firebase_id_token", original_verify_firebase))
+
+        httpd = server.ThreadingHTTPServer(("127.0.0.1", 0), server.StockRequestHandler)
+        thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+        thread.start()
+        self.addCleanup(httpd.server_close)
+        self.addCleanup(thread.join, 2)
+        self.addCleanup(httpd.shutdown)
+        host, port = httpd.server_address
+
+        conn = http.client.HTTPConnection(host, port, timeout=5)
+        self.addCleanup(conn.close)
+
+        conn.request("GET", "/api/trades")
+        response = conn.getresponse()
+        self.assertEqual(response.status, 401)
+        response.read()
+
+        conn.request("GET", "/api/trades", headers={"Authorization": "Bearer valid-firebase-token"})
+        response = conn.getresponse()
+        self.assertEqual(response.status, 200)
+        payload = json.loads(response.read().decode("utf-8"))
+        self.assertIn("items", payload)
 
 
 if __name__ == "__main__":

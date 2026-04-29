@@ -292,6 +292,26 @@ select:focus {
   border: 1px solid rgba(93, 66, 38, 0.18);
 }
 
+.secondary-button.logout-button {
+  background: linear-gradient(135deg, rgba(255, 229, 229, 0.98), rgba(255, 209, 209, 0.98));
+  color: #9f1f1f;
+  border: 1px solid rgba(190, 56, 56, 0.42);
+  font-weight: 700;
+  box-shadow: 0 4px 14px rgba(190, 56, 56, 0.16);
+}
+
+.secondary-button.logout-button:hover {
+  background: linear-gradient(135deg, rgba(255, 205, 205, 1), rgba(255, 177, 177, 1));
+  border-color: rgba(166, 35, 35, 0.62);
+  color: #7f1111;
+  box-shadow: 0 8px 18px rgba(166, 35, 35, 0.24);
+}
+
+.secondary-button.logout-button:focus-visible {
+  outline: 2px solid rgba(166, 35, 35, 0.32);
+  outline-offset: 2px;
+}
+
 .ghost-button {
   background: transparent;
   color: var(--muted);

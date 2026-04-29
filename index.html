@@ -28,6 +28,7 @@
         <button id="toggle-account-panel" class="secondary-button" type="button">帳戶管理</button>
         <button id="export-button" class="secondary-button" type="button">匯出 JSON</button>
         <label class="secondary-button upload-button" for="import-file">匯入 JSON</label>
+        <button id="logout-button" class="secondary-button logout-button" type="button">登出帳號</button>
         <input id="import-file" type="file" accept="application/json">
       </div>
     </header>
@@ -268,6 +269,7 @@
     </tr>
   </template>
 
+  <script src="firebase-auth-bridge.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

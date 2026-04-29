@@ -22,6 +22,15 @@ try:
 except ImportError:
     ZoneInfo = None
 
+try:
+    import firebase_admin
+    from firebase_admin import auth as firebase_auth
+    from firebase_admin import credentials as firebase_credentials
+except ImportError:
+    firebase_admin = None
+    firebase_auth = None
+    firebase_credentials = None
+
 
 BASE_DIR = Path(__file__).resolve().parent
 DB_PATH = BASE_DIR / "data" / "stock-records.sqlite3"
@@ -41,6 +50,7 @@ PUBLIC_PATHS = {
     "/api/auth/logout",
     "/login.html",
     "/auth.js",
+    "/firebase-auth-bridge.js",
     "/styles.css",
     "/favicon.ico",
 }
@@ -56,6 +66,7 @@ STATIC_FILES = {
     "/favicon.ico": "favicon.ico",
     "/app.js": "app.js",
     "/auth.js": "auth.js",
+    "/firebase-auth-bridge.js": "firebase-auth-bridge.js",
 
     "/dividend-calendar.js": "dividend-calendar.js",
     "/dividend-stats.js": "dividend-stats.js",
@@ -113,6 +124,34 @@ def get_redirect_uri():
     return os.getenv("REDIRECT_URI", "").strip()
 
 
+def get_firebase_api_key():
+    return os.getenv("FIREBASE_API_KEY", "").strip()
+
+
+def get_firebase_auth_domain():
+    return os.getenv("FIREBASE_AUTH_DOMAIN", "").strip()
+
+
+def get_firebase_project_id():
+    return os.getenv("FIREBASE_PROJECT_ID", "").strip()
+
+
+def get_firebase_app_id():
+    return os.getenv("FIREBASE_APP_ID", "").strip()
+
+
+def get_firebase_storage_bucket():
+    return os.getenv("FIREBASE_STORAGE_BUCKET", "").strip()
+
+
+def get_firebase_messaging_sender_id():
+    return os.getenv("FIREBASE_MESSAGING_SENDER_ID", "").strip()
+
+
+def get_firebase_service_account_path():
+    return os.getenv("FIREBASE_SERVICE_ACCOUNT_JSON", "").strip()
+
+
 def google_oauth_env_error():
     missing = []
     if not get_google_client_id():
@@ -144,7 +183,8 @@ def is_cookie_secure():
 
 
 def requires_authentication(path):
-    return path not in PUBLIC_PATHS
+    # Phase A Firebase 相容：僅保護 API 路徑；一般頁面先允許載入，交由前端 bridge 做 token guard。
+    return path.startswith("/api/") and path not in PUBLIC_PATHS
 
 
 def normalize_email(value):
@@ -384,11 +424,118 @@ def expired_session_cookie():
     return cookie.output(header="").strip()
 
 
+FIREBASE_APP = None
+FIREBASE_APP_LOCK = threading.Lock()
+
+
 def get_public_auth_config():
     return {
         "google_client_id": get_google_client_id(),
         "login_required": True,
+        "firebase": {
+            "apiKey": get_firebase_api_key(),
+            "authDomain": get_firebase_auth_domain(),
+            "projectId": get_firebase_project_id(),
+            "appId": get_firebase_app_id(),
+            "storageBucket": get_firebase_storage_bucket(),
+            "messagingSenderId": get_firebase_messaging_sender_id(),
+        },
     }
+
+
+def get_bearer_token_from_auth_header(auth_header):
+    if not auth_header:
+        return ""
+    prefix = "Bearer "
+    if not auth_header.startswith(prefix):
+        return ""
+    return auth_header[len(prefix):].strip()
+
+
+def ensure_firebase_admin_app():
+    if firebase_admin is None or firebase_auth is None:
+        raise ValueError("伺服器尚未安裝 firebase-admin，請先安裝後再啟用 Firebase Auth")
+
+    global FIREBASE_APP
+    if FIREBASE_APP is not None:
+        return FIREBASE_APP
+
+    with FIREBASE_APP_LOCK:
+        if FIREBASE_APP is not None:
+            return FIREBASE_APP
+
+        service_account_path = get_firebase_service_account_path()
+        if service_account_path:
+            cred = firebase_credentials.Certificate(service_account_path)
+            FIREBASE_APP = firebase_admin.initialize_app(cred)
+        else:
+            FIREBASE_APP = firebase_admin.initialize_app()
+
+    return FIREBASE_APP
+
+
+def verify_firebase_id_token(id_token):
+    if not id_token:
+        return None
+    ensure_firebase_admin_app()
+    try:
+        return firebase_auth.verify_id_token(id_token)
+    except Exception:
+        return None
+
+
+def upsert_auth_user_from_firebase_claims(claims):
+    uid = str(claims.get("uid") or "").strip()
+    email = normalize_email(claims.get("email"))
+    if not uid or not email:
+        raise ValueError("Firebase ID Token 缺少 uid 或 email")
+    if not claims.get("email_verified", False):
+        raise ValueError("Firebase 帳號 email 尚未驗證")
+
+    allowed_emails = get_allowed_google_emails()
+    allowed_domain = get_allowed_google_domain()
+    if allowed_emails and email not in allowed_emails:
+        raise ValueError("此 Google 帳號未被授權使用")
+    if allowed_domain and not email.endswith("@" + allowed_domain):
+        raise ValueError("此 Google 帳號網域未被授權使用")
+
+    now_text = datetime.now(TAIPEI_TZ).isoformat(timespec="seconds")
+    name = str(claims.get("name") or email)
+    picture = str(claims.get("picture") or "")
+
+    with get_connection() as connection:
+        connection.execute(
+            """
+            INSERT INTO auth_users (email, google_sub, name, picture, created_at, updated_at, last_login_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(email) DO UPDATE SET
+                google_sub = excluded.google_sub,
+                name = excluded.name,
+                picture = excluded.picture,
+                updated_at = excluded.updated_at,
+                last_login_at = excluded.last_login_at
+            """,
+            (email, uid, name, picture, now_text, now_text, now_text),
+        )
+        connection.commit()
+
+    return {"email": email, "name": name, "picture": picture, "uid": uid}
+
+
+def get_authenticated_user_from_bearer(auth_header):
+    id_token = get_bearer_token_from_auth_header(auth_header)
+    if not id_token:
+        return None
+    try:
+        claims = verify_firebase_id_token(id_token)
+    except Exception:
+        return None
+    if not claims:
+        return None
+    try:
+        return upsert_auth_user_from_firebase_claims(claims)
+    except ValueError:
+        return None
 
 
 def build_google_auth_url():
@@ -2217,6 +2364,9 @@ class StockRequestHandler(BaseHTTPRequestHandler):
         self.wfile.write(content)
 
     def get_authenticated_user(self):
+        bearer_user = get_authenticated_user_from_bearer(self.headers.get("Authorization", ""))
+        if bearer_user:
+            return bearer_user
         return get_authenticated_user_from_cookie(self.headers.get("Cookie", ""))
 
     def request_origin(self):

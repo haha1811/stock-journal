@@ -152,55 +152,61 @@ STOCK_APP_HOST=0.0.0.0 STOCK_APP_PORT=8000 python3 server.py
   - 預設：`8000`
   - 範例：`8080`
 
-### Google 登入
+### Firebase Auth（Google Sign-In）
 
 可複製 `.env.example` 成 `.env`；`server.py` 會自動讀取專案根目錄的 `.env`。
 
-必填：
+前端（可公開）必填：
 
-- `GOOGLE_CLIENT_ID`：Google OAuth Web Client ID。
-- `GOOGLE_CLIENT_SECRET`：Google OAuth Web Client Secret。
-- `REDIRECT_URI`：Google 登入完成後回呼網址，localhost 範例：`http://localhost:8000/api/auth/google/callback`。
+- `FIREBASE_API_KEY`
+- `FIREBASE_AUTH_DOMAIN`
+- `FIREBASE_PROJECT_ID`
+- `FIREBASE_APP_ID`
 
-選填：
+前端（可公開）選填：
+
+- `FIREBASE_STORAGE_BUCKET`
+- `FIREBASE_MESSAGING_SENDER_ID`
+
+後端（不可公開）必填其一：
+
+- `FIREBASE_SERVICE_ACCOUNT_JSON`（Service Account JSON 檔案路徑）
+- 或使用主機上的 `GOOGLE_APPLICATION_CREDENTIALS` / GCP ADC
+
+相容保留（Phase A，舊 Google OAuth callback/session 流程）：
+
+- `GOOGLE_CLIENT_ID`
+- `GOOGLE_CLIENT_SECRET`
+- `REDIRECT_URI`
+
+其他選填：
 
 - `STOCK_ALLOWED_GOOGLE_EMAILS`：逗號分隔 email allowlist，例如 `user1@gmail.com,user2@gmail.com`。
 - `STOCK_ALLOWED_GOOGLE_DOMAIN`：限制 Google Workspace 網域，例如 `example.com`。
 - `STOCK_COOKIE_SECURE`：正式 HTTPS 部署建議設為 `true`，讓 session cookie 加上 `Secure`。
 
-## Google OAuth 設定與測試
+## Firebase Auth 設定與測試（Phase A MVP）
 
-1. 到 Google Cloud Console → APIs & Services → Credentials。
-2. 建立 `OAuth client ID`，Application type 選 `Web application`。
-3. Authorized JavaScript origins 加入：
-
-```text
-http://localhost:8000
-http://127.0.0.1:8000
-```
-
-4. Authorized redirect URIs 加入，且必須和 `REDIRECT_URI` 完全一致：
-
-```text
-http://localhost:8000/api/auth/google/callback
-```
-
-5. 設定 `.env`：
+1. 到 Firebase Console 啟用 Authentication → Sign-in method → Google。
+2. 在 Project settings 取得 Web App config，填入 `.env` 的 `FIREBASE_*` 欄位。
+3. 在後端主機配置 Admin SDK 憑證：
+   - 建議使用 `FIREBASE_SERVICE_ACCOUNT_JSON=/abs/path/service-account.json`
+   - 憑證檔不可 commit
+4. 安裝後端驗證套件：
 
 ```bash
-cp .env.example .env
-# 編輯 .env，填入 GOOGLE_CLIENT_ID、GOOGLE_CLIENT_SECRET、REDIRECT_URI
+python3 -m pip install firebase-admin
 ```
 
-6. 啟動 server：
+5. 啟動 server：
 
 ```bash
 python3 server.py
 ```
 
-7. 測試流程：開啟 `http://localhost:8000` → 看到登入頁 → 點 `Log in with Google` → Google 登入 → 回到 `/api/auth/google/callback` → 成功後導回系統首頁。若 env 缺少或 redirect URI 不符，API 會回傳明確錯誤與修正提示。
+6. 測試流程：開啟 `http://localhost:8000/login.html` → 點 `Log in with Google` → 成功後導回 `/`。前端會將 Firebase ID Token 存到 localStorage，並由 `firebase-auth-bridge.js` 自動在 `/api/*` 請求加上 `Authorization: Bearer <token>`。
 
-8. 完整 smoke test 檢查清單請參考：
+7. 完整 smoke test 檢查清單請參考：
 
 - [`docs/oauth-smoke-test-checklist.md`](./docs/oauth-smoke-test-checklist.md)
 
