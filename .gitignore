@@ -8,6 +8,8 @@ __pycache__/
 *.db-journal
 data/
 node_modules/
+.env
+!.env.example
 .DS_Store
 Thumbs.db
 release-v*.md

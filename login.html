@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>登入股票交易紀錄台</title>
+  <link rel="icon" href="/favicon.ico" sizes="any">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="page-shell auth-page-shell">
+    <main class="auth-card panel">
+      <p class="eyebrow">Stock Journal SaaS</p>
+      <h1>登入股票交易紀錄台</h1>
+      <p class="hero-copy">
+        請使用 Google 帳號完成身份驗證，驗證成功後才能開始使用交易、庫存與股利紀錄功能。
+      </p>
+
+      <a id="google-login-button" class="google-login-button" href="/api/auth/google/start">
+        <span class="google-mark" aria-hidden="true">G</span>
+        <span>Log in with Google</span>
+      </a>
+    </main>
+  </div>
+
+  <script src="auth.js"></script>
+</body>
+</html>

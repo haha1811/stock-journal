@@ -830,3 +830,79 @@ tbody tr:nth-child(even) {
     flex-direction: column;
   }
 }
+
+.auth-page-shell {
+  min-height: calc(100vh - 80px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.auth-card {
+  width: min(520px, 100%);
+  padding: 36px;
+  text-align: center;
+}
+
+.auth-card h1 {
+  margin: 0;
+  font-size: clamp(2rem, 5vw, 3rem);
+}
+
+.google-login-button {
+  width: 100%;
+  margin: 28px 0 16px;
+  min-height: 52px;
+  border: 1px solid rgba(46, 36, 26, 0.18);
+  border-radius: 999px;
+  background: #fff;
+  color: var(--text);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  font-weight: 800;
+  cursor: pointer;
+  text-decoration: none;
+  box-shadow: 0 10px 24px rgba(107, 73, 40, 0.1);
+  transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
+}
+
+.google-login-button:hover:not(:disabled) {
+  transform: translateY(-1px);
+  border-color: rgba(180, 77, 33, 0.42);
+  box-shadow: 0 14px 30px rgba(107, 73, 40, 0.16);
+}
+
+.google-login-button:disabled,
+.google-login-button.is-disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.google-mark {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  display: inline-grid;
+  place-items: center;
+  font-family: Arial, sans-serif;
+  font-weight: 800;
+  color: #4285f4;
+  background: conic-gradient(from -45deg, #4285f4 0 25%, #34a853 0 50%, #fbbc05 0 75%, #ea4335 0 100%);
+  position: relative;
+}
+
+.google-mark::before {
+  content: "";
+  position: absolute;
+  inset: 4px;
+  border-radius: 50%;
+  background: #fff;
+}
+
+.google-mark::after {
+  content: "G";
+  position: relative;
+  z-index: 1;
+}

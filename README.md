@@ -13,9 +13,12 @@
 - Python：建議 `3.11+`
 - 作業系統：`Windows`、`Linux`
 - 主要依賴：Python 標準函式庫（目前不需額外安裝第三方套件）
+- Google OAuth：SaaS 登入版需要設定 `GOOGLE_CLIENT_ID`、`GOOGLE_CLIENT_SECRET`、`REDIRECT_URI`
 
 ## 目前功能
 
+- Google 帳號登入驗證，驗證成功後才可使用系統
+- 可用 email allowlist 或 Google Workspace 網域限制使用者
 - 新增 / 編輯 / 刪除買賣交易
 - 多帳戶欄位與帳戶切換
 - 帳戶管理頁面
@@ -140,12 +143,66 @@ STOCK_APP_HOST=0.0.0.0 STOCK_APP_PORT=8000 python3 server.py
 
 ## 環境變數
 
+### 服務綁定
+
 - `STOCK_APP_HOST`
   - 預設：`127.0.0.1`
   - 範例：`0.0.0.0`
 - `STOCK_APP_PORT`
   - 預設：`8000`
   - 範例：`8080`
+
+### Google 登入
+
+可複製 `.env.example` 成 `.env`；`server.py` 會自動讀取專案根目錄的 `.env`。
+
+必填：
+
+- `GOOGLE_CLIENT_ID`：Google OAuth Web Client ID。
+- `GOOGLE_CLIENT_SECRET`：Google OAuth Web Client Secret。
+- `REDIRECT_URI`：Google 登入完成後回呼網址，localhost 範例：`http://localhost:8000/api/auth/google/callback`。
+
+選填：
+
+- `STOCK_ALLOWED_GOOGLE_EMAILS`：逗號分隔 email allowlist，例如 `user1@gmail.com,user2@gmail.com`。
+- `STOCK_ALLOWED_GOOGLE_DOMAIN`：限制 Google Workspace 網域，例如 `example.com`。
+- `STOCK_COOKIE_SECURE`：正式 HTTPS 部署建議設為 `true`，讓 session cookie 加上 `Secure`。
+
+## Google OAuth 設定與測試
+
+1. 到 Google Cloud Console → APIs & Services → Credentials。
+2. 建立 `OAuth client ID`，Application type 選 `Web application`。
+3. Authorized JavaScript origins 加入：
+
+```text
+http://localhost:8000
+http://127.0.0.1:8000
+```
+
+4. Authorized redirect URIs 加入，且必須和 `REDIRECT_URI` 完全一致：
+
+```text
+http://localhost:8000/api/auth/google/callback
+```
+
+5. 設定 `.env`：
+
+```bash
+cp .env.example .env
+# 編輯 .env，填入 GOOGLE_CLIENT_ID、GOOGLE_CLIENT_SECRET、REDIRECT_URI
+```
+
+6. 啟動 server：
+
+```bash
+python3 server.py
+```
+
+7. 測試流程：開啟 `http://localhost:8000` → 看到登入頁 → 點 `Log in with Google` → Google 登入 → 回到 `/api/auth/google/callback` → 成功後導回系統首頁。若 env 缺少或 redirect URI 不符，API 會回傳明確錯誤與修正提示。
+
+8. 完整 smoke test 檢查清單請參考：
+
+- [`docs/oauth-smoke-test-checklist.md`](./docs/oauth-smoke-test-checklist.md)
 
 ## API 概念
 

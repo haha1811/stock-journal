@@ -11,10 +11,14 @@
 ## [Unreleased]
 
 ### Added
-- 待補充
+- SaaS 登入模式：新增「Log in with Google」登入按鈕與完整 Google OAuth 2.0 authorization code flow，包含 `/api/auth/google/start` 與 `/api/auth/google/callback`。
+- 新增後端 session cookie、登入使用者與 session 資料表，保護既有交易、庫存與股利頁面/API。
+- 新增 `STOCK_ALLOWED_GOOGLE_EMAILS` 與 `STOCK_ALLOWED_GOOGLE_DOMAIN` 限制可登入使用者。
+- 新增 auth 單元測試與 HTTP smoke 測試，涵蓋登入憑證驗證、session cookie 與未登入 API 阻擋。
 
 ### Changed
-- 待補充
+- README 補充 Google OAuth Client ID、正式部署 cookie 與 allowlist 設定說明。
+- systemd 範例補充 Google 登入所需環境變數。
 
 ### Fixed
 - 待補充
