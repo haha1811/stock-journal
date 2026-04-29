@@ -7,6 +7,14 @@ Type=simple
 WorkingDirectory=/opt/stock-journal
 Environment=STOCK_APP_HOST=0.0.0.0
 Environment=STOCK_APP_PORT=8000
+# Google OAuth 2.0 Web application settings. 正式部署前必填。
+Environment=GOOGLE_CLIENT_ID=your-google-oauth-client-id.apps.googleusercontent.com
+Environment=GOOGLE_CLIENT_SECRET=your-google-oauth-client-secret
+Environment=REDIRECT_URI=https://your-domain.example/api/auth/google/callback
+# 建議正式部署時限制可登入帳號；多個 email 請用逗號分隔。
+Environment=STOCK_ALLOWED_GOOGLE_EMAILS=user@example.com
+# HTTPS 部署建議設為 true，讓 session cookie 加上 Secure。
+Environment=STOCK_COOKIE_SECURE=true
 ExecStart=/usr/bin/python3 /opt/stock-journal/server.py
 Restart=always
 RestartSec=5

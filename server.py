@@ -1,6 +1,8 @@
+import hashlib
 import json
 import mimetypes
 import os
+import secrets
 import sqlite3
 import threading
 import traceback
@@ -10,6 +12,7 @@ import urllib.request
 from datetime import datetime, timedelta, timezone
 from html.parser import HTMLParser
 from http import HTTPStatus
+from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
@@ -19,6 +22,15 @@ try:
 except ImportError:
     ZoneInfo = None
 
+try:
+    import firebase_admin
+    from firebase_admin import auth as firebase_auth
+    from firebase_admin import credentials as firebase_credentials
+except ImportError:
+    firebase_admin = None
+    firebase_auth = None
+    firebase_credentials = None
+
 
 BASE_DIR = Path(__file__).resolve().parent
 DB_PATH = BASE_DIR / "data" / "stock-records.sqlite3"
@@ -27,21 +39,62 @@ PORT = 8000
 TAIPEI_TZ = ZoneInfo("Asia/Taipei") if ZoneInfo else timezone(timedelta(hours=8), name="Asia/Taipei")
 PRICE_REFRESH_HOUR = 15
 DIVIDEND_REFRESH_HOUR = 6
+SESSION_COOKIE_NAME = "stock_journal_session"
+SESSION_DAYS = 14
+PUBLIC_PATHS = {
+    "/api/health",
+    "/api/auth/config",
+    "/api/auth/google/start",
+    "/api/auth/google/callback",
+    "/api/auth/google",
+    "/api/auth/logout",
+    "/login.html",
+    "/auth.js",
+    "/firebase-auth-bridge.js",
+    "/styles.css",
+    "/favicon.ico",
+}
 STATIC_FILES = {
     "/": "index.html",
     "/index.html": "index.html",
+    "/login.html": "login.html",
+
     "/inventory.html": "inventory.html",
     "/dividends.html": "dividends.html",
     "/dividend-stats.html": "dividend-stats.html",
     "/dividend-calendar.html": "dividend-calendar.html",
     "/favicon.ico": "favicon.ico",
     "/app.js": "app.js",
+    "/auth.js": "auth.js",
+    "/firebase-auth-bridge.js": "firebase-auth-bridge.js",
+
     "/dividend-calendar.js": "dividend-calendar.js",
     "/dividend-stats.js": "dividend-stats.js",
     "/dividends.js": "dividends.js",
     "/inventory.js": "inventory.js",
     "/styles.css": "styles.css",
 }
+
+
+def load_dotenv(path=BASE_DIR / ".env"):
+    """Load simple KEY=value pairs from .env without overriding real env vars."""
+    if not path.exists():
+        return
+    for raw_line in path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        if key.startswith("export "):
+            key = key[7:].strip()
+        if not key or key in os.environ:
+            continue
+        value = value.strip().strip('"').strip("'")
+        os.environ[key] = value
+
+
+load_dotenv()
 
 
 def get_env_host():
@@ -59,6 +112,484 @@ def get_env_port():
     return port
 
 
+def get_google_client_id():
+    return os.getenv("GOOGLE_CLIENT_ID", os.getenv("STOCK_GOOGLE_CLIENT_ID", "")).strip()
+
+
+def get_google_client_secret():
+    return os.getenv("GOOGLE_CLIENT_SECRET", "").strip()
+
+
+def get_redirect_uri():
+    return os.getenv("REDIRECT_URI", "").strip()
+
+
+def get_firebase_api_key():
+    return os.getenv("FIREBASE_API_KEY", "").strip()
+
+
+def get_firebase_auth_domain():
+    return os.getenv("FIREBASE_AUTH_DOMAIN", "").strip()
+
+
+def get_firebase_project_id():
+    return os.getenv("FIREBASE_PROJECT_ID", "").strip()
+
+
+def get_firebase_app_id():
+    return os.getenv("FIREBASE_APP_ID", "").strip()
+
+
+def get_firebase_storage_bucket():
+    return os.getenv("FIREBASE_STORAGE_BUCKET", "").strip()
+
+
+def get_firebase_messaging_sender_id():
+    return os.getenv("FIREBASE_MESSAGING_SENDER_ID", "").strip()
+
+
+def get_firebase_service_account_path():
+    return os.getenv("FIREBASE_SERVICE_ACCOUNT_JSON", "").strip()
+
+
+def google_oauth_env_error():
+    missing = []
+    if not get_google_client_id():
+        missing.append("GOOGLE_CLIENT_ID")
+    if not get_google_client_secret():
+        missing.append("GOOGLE_CLIENT_SECRET")
+    if not get_redirect_uri():
+        missing.append("REDIRECT_URI")
+    if not missing:
+        return None
+    return {
+        "error": "Google OAuth 環境變數未設定完整：" + ", ".join(missing),
+        "fix": "請依 .env.example 設定 GOOGLE_CLIENT_ID、GOOGLE_CLIENT_SECRET、REDIRECT_URI；GCP Authorized redirect URI 必須和 REDIRECT_URI 完全一致，例如 http://localhost:8000/api/auth/google/callback。",
+        "missing": missing,
+    }
+
+
+def get_allowed_google_emails():
+    raw = os.getenv("STOCK_ALLOWED_GOOGLE_EMAILS", "").strip()
+    return {item.strip().lower() for item in raw.split(",") if item.strip()}
+
+
+def get_allowed_google_domain():
+    return os.getenv("STOCK_ALLOWED_GOOGLE_DOMAIN", "").strip().lower()
+
+
+def is_cookie_secure():
+    return os.getenv("STOCK_COOKIE_SECURE", "").strip().lower() in {"1", "true", "yes", "y"}
+
+
+def requires_authentication(path):
+    # Phase A Firebase 相容：僅保護 API 路徑；一般頁面先允許載入，交由前端 bridge 做 token guard。
+    return path.startswith("/api/") and path not in PUBLIC_PATHS
+
+
+def normalize_email(value):
+    return str(value or "").strip().lower()
+
+
+def hash_session_id(session_id):
+    return hashlib.sha256(session_id.encode("utf-8")).hexdigest()
+
+
+def fetch_google_tokeninfo(credential):
+    url = "https://oauth2.googleapis.com/tokeninfo?id_token=" + urllib.parse.quote(credential)
+    with urllib.request.urlopen(url, timeout=10) as response:
+        return json.loads(response.read().decode("utf-8"))
+
+
+def exchange_google_code(code, redirect_uri=None):
+    env_error = google_oauth_env_error()
+    if env_error:
+        raise ValueError(env_error["error"] + "；" + env_error["fix"])
+
+    body = urllib.parse.urlencode(
+        {
+            "code": code,
+            "client_id": get_google_client_id(),
+            "client_secret": get_google_client_secret(),
+            "redirect_uri": redirect_uri or get_redirect_uri(),
+            "grant_type": "authorization_code",
+        }
+    ).encode("utf-8")
+    request = urllib.request.Request(
+        "https://oauth2.googleapis.com/token",
+        data=body,
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=15) as response:
+            return json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as error:
+        detail = error.read().decode("utf-8", errors="ignore")
+        raise ValueError("Google OAuth code 換 token 失敗，請確認 REDIRECT_URI 與 GCP 設定完全一致。" + detail) from error
+    except urllib.error.URLError as error:
+        raise ValueError("無法連線到 Google OAuth token endpoint，請稍後再試。") from error
+
+
+def fetch_google_userinfo(access_token):
+    if not access_token:
+        raise ValueError("Google OAuth token response 缺少 access_token")
+    request = urllib.request.Request(
+        "https://openidconnect.googleapis.com/v1/userinfo",
+        headers={"Authorization": f"Bearer {access_token}"},
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=15) as response:
+            return json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as error:
+        detail = error.read().decode("utf-8", errors="ignore")
+        raise ValueError("無法取得 Google 使用者資訊。" + detail) from error
+    except urllib.error.URLError as error:
+        raise ValueError("無法連線到 Google userinfo endpoint，請稍後再試。") from error
+
+
+def validate_google_profile(payload):
+    if str(payload.get("email_verified", "")).lower() not in {"true", "1"}:
+        raise ValueError("Google 帳號尚未完成 email 驗證")
+    email = normalize_email(payload.get("email"))
+    if not email:
+        raise ValueError("Google 使用者資訊缺少 email")
+    google_sub = str(payload.get("sub", "")).strip()
+    if not google_sub:
+        raise ValueError("Google 使用者資訊缺少 sub")
+
+    allowed_emails = get_allowed_google_emails()
+    allowed_domain = get_allowed_google_domain()
+    if allowed_emails and email not in allowed_emails:
+        raise ValueError("此 Google 帳號未被授權使用")
+    if allowed_domain and not email.endswith("@" + allowed_domain):
+        raise ValueError("此 Google 帳號網域未被授權使用")
+
+    return {
+        "sub": google_sub,
+        "email": email,
+        "email_verified": True,
+        "name": str(payload.get("name") or email),
+        "picture": str(payload.get("picture") or ""),
+    }
+
+
+def verify_google_identity(credential, client_id=None, tokeninfo_fetcher=fetch_google_tokeninfo):
+    client_id = (client_id or get_google_client_id()).strip()
+    if not client_id:
+        raise ValueError("尚未設定 GOOGLE_CLIENT_ID 或 STOCK_GOOGLE_CLIENT_ID")
+    if not credential:
+        raise ValueError("缺少 Google 登入憑證")
+
+    try:
+        payload = tokeninfo_fetcher(credential)
+    except urllib.error.URLError as error:
+        raise ValueError("無法驗證 Google 登入憑證") from error
+
+    if payload.get("aud") != client_id:
+        raise ValueError("Google 登入憑證的 client_id 不符")
+    if str(payload.get("email_verified", "")).lower() not in {"true", "1"}:
+        raise ValueError("Google 帳號尚未完成 email 驗證")
+
+    email = normalize_email(payload.get("email"))
+    if not email:
+        raise ValueError("Google 登入憑證缺少 email")
+
+    allowed_emails = get_allowed_google_emails()
+    allowed_domain = get_allowed_google_domain()
+    if allowed_emails and email not in allowed_emails:
+        raise ValueError("此 Google 帳號未被授權使用")
+    if allowed_domain and not email.endswith("@" + allowed_domain):
+        raise ValueError("此 Google 帳號網域未被授權使用")
+
+    return {
+        "sub": str(payload.get("sub", "")).strip(),
+        "email": email,
+        "email_verified": True,
+        "name": str(payload.get("name") or email),
+        "picture": str(payload.get("picture") or ""),
+    }
+
+
+def create_authenticated_session(profile):
+    email = normalize_email(profile.get("email"))
+    google_sub = str(profile.get("sub", "")).strip()
+    if not email or not google_sub:
+        raise ValueError("Google 使用者資訊不完整")
+
+    now = datetime.now(TAIPEI_TZ)
+    now_text = now.isoformat(timespec="seconds")
+    expires_at = now + timedelta(days=SESSION_DAYS)
+    session_id = secrets.token_urlsafe(32)
+    session_hash = hash_session_id(session_id)
+
+    with get_connection() as connection:
+        connection.execute(
+            """
+            INSERT INTO auth_users (email, google_sub, name, picture, created_at, updated_at, last_login_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(email) DO UPDATE SET
+                google_sub = excluded.google_sub,
+                name = excluded.name,
+                picture = excluded.picture,
+                updated_at = excluded.updated_at,
+                last_login_at = excluded.last_login_at
+            """,
+            (
+                email,
+                google_sub,
+                str(profile.get("name") or email),
+                str(profile.get("picture") or ""),
+                now_text,
+                now_text,
+                now_text,
+            ),
+        )
+        connection.execute(
+            "INSERT INTO auth_sessions (id_hash, email, created_at, expires_at) VALUES (?, ?, ?, ?)",
+            (session_hash, email, now_text, expires_at.isoformat(timespec="seconds")),
+        )
+        connection.commit()
+
+    cookie = SimpleCookie()
+    cookie[SESSION_COOKIE_NAME] = session_id
+    cookie[SESSION_COOKIE_NAME]["path"] = "/"
+    cookie[SESSION_COOKIE_NAME]["httponly"] = True
+    cookie[SESSION_COOKIE_NAME]["samesite"] = "Lax"
+    cookie[SESSION_COOKIE_NAME]["max-age"] = str(SESSION_DAYS * 24 * 60 * 60)
+    if is_cookie_secure():
+        cookie[SESSION_COOKIE_NAME]["secure"] = True
+
+    return {
+        "email": email,
+        "name": str(profile.get("name") or email),
+        "picture": str(profile.get("picture") or ""),
+        "Set-Cookie": cookie.output(header="").strip(),
+    }
+
+
+def get_authenticated_user_from_cookie(cookie_header):
+    if not cookie_header:
+        return None
+    cookie = SimpleCookie()
+    try:
+        cookie.load(cookie_header)
+    except Exception:
+        return None
+    if SESSION_COOKIE_NAME not in cookie:
+        return None
+
+    session_id = cookie[SESSION_COOKIE_NAME].value
+    session_hash = hash_session_id(session_id)
+    now_text = datetime.now(TAIPEI_TZ).isoformat(timespec="seconds")
+    with get_connection() as connection:
+        row = connection.execute(
+            """
+            SELECT auth_users.email, auth_users.name, auth_users.picture
+            FROM auth_sessions
+            JOIN auth_users ON auth_users.email = auth_sessions.email
+            WHERE auth_sessions.id_hash = ? AND auth_sessions.expires_at > ?
+            """,
+            (session_hash, now_text),
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def delete_authenticated_session(cookie_header):
+    user = get_authenticated_user_from_cookie(cookie_header)
+    cookie = SimpleCookie()
+    try:
+        cookie.load(cookie_header or "")
+    except Exception:
+        return user
+    if SESSION_COOKIE_NAME in cookie:
+        with get_connection() as connection:
+            connection.execute(
+                "DELETE FROM auth_sessions WHERE id_hash = ?",
+                (hash_session_id(cookie[SESSION_COOKIE_NAME].value),),
+            )
+            connection.commit()
+    return user
+
+
+def expired_session_cookie():
+    cookie = SimpleCookie()
+    cookie[SESSION_COOKIE_NAME] = ""
+    cookie[SESSION_COOKIE_NAME]["path"] = "/"
+    cookie[SESSION_COOKIE_NAME]["max-age"] = "0"
+    cookie[SESSION_COOKIE_NAME]["httponly"] = True
+    cookie[SESSION_COOKIE_NAME]["samesite"] = "Lax"
+    if is_cookie_secure():
+        cookie[SESSION_COOKIE_NAME]["secure"] = True
+    return cookie.output(header="").strip()
+
+
+FIREBASE_APP = None
+FIREBASE_APP_LOCK = threading.Lock()
+
+
+def get_public_auth_config():
+    return {
+        "google_client_id": get_google_client_id(),
+        "login_required": True,
+        "firebase": {
+            "apiKey": get_firebase_api_key(),
+            "authDomain": get_firebase_auth_domain(),
+            "projectId": get_firebase_project_id(),
+            "appId": get_firebase_app_id(),
+            "storageBucket": get_firebase_storage_bucket(),
+            "messagingSenderId": get_firebase_messaging_sender_id(),
+        },
+    }
+
+
+def get_bearer_token_from_auth_header(auth_header):
+    if not auth_header:
+        return ""
+    prefix = "Bearer "
+    if not auth_header.startswith(prefix):
+        return ""
+    return auth_header[len(prefix):].strip()
+
+
+def ensure_firebase_admin_app():
+    if firebase_admin is None or firebase_auth is None:
+        raise ValueError("伺服器尚未安裝 firebase-admin，請先安裝後再啟用 Firebase Auth")
+
+    global FIREBASE_APP
+    if FIREBASE_APP is not None:
+        return FIREBASE_APP
+
+    with FIREBASE_APP_LOCK:
+        if FIREBASE_APP is not None:
+            return FIREBASE_APP
+
+        service_account_path = get_firebase_service_account_path()
+        if service_account_path:
+            cred = firebase_credentials.Certificate(service_account_path)
+            FIREBASE_APP = firebase_admin.initialize_app(cred)
+        else:
+            FIREBASE_APP = firebase_admin.initialize_app()
+
+    return FIREBASE_APP
+
+
+def verify_firebase_id_token(id_token):
+    if not id_token:
+        return None
+    ensure_firebase_admin_app()
+    try:
+        return firebase_auth.verify_id_token(id_token)
+    except Exception:
+        return None
+
+
+def upsert_auth_user_from_firebase_claims(claims):
+    uid = str(claims.get("uid") or "").strip()
+    email = normalize_email(claims.get("email"))
+    if not uid or not email:
+        raise ValueError("Firebase ID Token 缺少 uid 或 email")
+    if not claims.get("email_verified", False):
+        raise ValueError("Firebase 帳號 email 尚未驗證")
+
+    allowed_emails = get_allowed_google_emails()
+    allowed_domain = get_allowed_google_domain()
+    if allowed_emails and email not in allowed_emails:
+        raise ValueError("此 Google 帳號未被授權使用")
+    if allowed_domain and not email.endswith("@" + allowed_domain):
+        raise ValueError("此 Google 帳號網域未被授權使用")
+
+    now_text = datetime.now(TAIPEI_TZ).isoformat(timespec="seconds")
+    name = str(claims.get("name") or email)
+    picture = str(claims.get("picture") or "")
+
+    with get_connection() as connection:
+        connection.execute(
+            """
+            INSERT INTO auth_users (email, google_sub, name, picture, created_at, updated_at, last_login_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(email) DO UPDATE SET
+                google_sub = excluded.google_sub,
+                name = excluded.name,
+                picture = excluded.picture,
+                updated_at = excluded.updated_at,
+                last_login_at = excluded.last_login_at
+            """,
+            (email, uid, name, picture, now_text, now_text, now_text),
+        )
+        connection.commit()
+
+    return {"email": email, "name": name, "picture": picture, "uid": uid}
+
+
+def get_authenticated_user_from_bearer(auth_header):
+    id_token = get_bearer_token_from_auth_header(auth_header)
+    if not id_token:
+        return None
+    try:
+        claims = verify_firebase_id_token(id_token)
+    except Exception:
+        return None
+    if not claims:
+        return None
+    try:
+        return upsert_auth_user_from_firebase_claims(claims)
+    except ValueError:
+        return None
+
+
+def build_google_auth_url():
+    env_error = google_oauth_env_error()
+    if env_error:
+        raise ValueError(env_error["error"] + "；" + env_error["fix"])
+
+    state = secrets.token_urlsafe(24)
+    params = urllib.parse.urlencode(
+        {
+            "client_id": get_google_client_id(),
+            "redirect_uri": get_redirect_uri(),
+            "response_type": "code",
+            "scope": "openid email profile",
+            "state": state,
+            "prompt": "select_account",
+        }
+    )
+    return f"https://accounts.google.com/o/oauth2/v2/auth?{params}", state
+
+
+def oauth_state_cookie(state):
+    cookie = SimpleCookie()
+    cookie["oauth_state"] = state
+    cookie["oauth_state"]["path"] = "/"
+    cookie["oauth_state"]["httponly"] = True
+    cookie["oauth_state"]["samesite"] = "Lax"
+    cookie["oauth_state"]["max-age"] = "600"
+    if is_cookie_secure():
+        cookie["oauth_state"]["secure"] = True
+    return cookie.output(header="").strip()
+
+
+def expired_oauth_state_cookie():
+    cookie = SimpleCookie()
+    cookie["oauth_state"] = ""
+    cookie["oauth_state"]["path"] = "/"
+    cookie["oauth_state"]["max-age"] = "0"
+    cookie["oauth_state"]["httponly"] = True
+    cookie["oauth_state"]["samesite"] = "Lax"
+    if is_cookie_secure():
+        cookie["oauth_state"]["secure"] = True
+    return cookie.output(header="").strip()
+
+
+def get_oauth_state_from_cookie(cookie_header):
+    cookie = SimpleCookie()
+    try:
+        cookie.load(cookie_header or "")
+    except Exception:
+        return ""
+    return cookie["oauth_state"].value if "oauth_state" in cookie else ""
+
+
 def strip_prefix(value, prefix):
     return value[len(prefix):] if value.startswith(prefix) else value
 
@@ -66,6 +597,30 @@ def strip_prefix(value, prefix):
 def ensure_database():
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     with get_connection() as connection:
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS auth_users (
+                email TEXT PRIMARY KEY,
+                google_sub TEXT NOT NULL UNIQUE,
+                name TEXT NOT NULL DEFAULT '',
+                picture TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                last_login_at TEXT NOT NULL
+            )
+            """
+        )
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS auth_sessions (
+                id_hash TEXT PRIMARY KEY,
+                email TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                expires_at TEXT NOT NULL,
+                FOREIGN KEY(email) REFERENCES auth_users(email) ON DELETE CASCADE
+            )
+            """
+        )
         connection.execute(
             """
             CREATE TABLE IF NOT EXISTS accounts (
@@ -1590,6 +2145,26 @@ class StockRequestHandler(BaseHTTPRequestHandler):
                 self.send_json({"status": "ok"})
                 return
 
+            if parsed.path == "/api/auth/config":
+                self.send_json(get_public_auth_config())
+                return
+
+            if parsed.path == "/api/auth/google/start":
+                self.redirect_to_google_auth()
+                return
+
+            if parsed.path == "/api/auth/google/callback":
+                self.handle_google_callback(query)
+                return
+
+            if requires_authentication(parsed.path) and not self.get_authenticated_user():
+                self.reject_unauthenticated(parsed.path)
+                return
+
+            if parsed.path == "/api/auth/me":
+                self.send_json({"user": self.get_authenticated_user()})
+                return
+
             if parsed.path == "/api/trades":
                 self.send_json({"items": list_trades()})
                 return
@@ -1622,6 +2197,30 @@ class StockRequestHandler(BaseHTTPRequestHandler):
 
         try:
             payload = self.read_json_body()
+
+            if parsed.path == "/api/auth/google":
+                profile = verify_google_identity(payload.get("credential", ""))
+                session = create_authenticated_session(profile)
+                self.send_json(
+                    {
+                        "user": {
+                            "email": session["email"],
+                            "name": session["name"],
+                            "picture": session["picture"],
+                        }
+                    },
+                    headers={"Set-Cookie": session["Set-Cookie"]},
+                )
+                return
+
+            if parsed.path == "/api/auth/logout":
+                delete_authenticated_session(self.headers.get("Cookie", ""))
+                self.send_json({"ok": True}, headers={"Set-Cookie": expired_session_cookie()})
+                return
+
+            if requires_authentication(parsed.path) and not self.get_authenticated_user():
+                self.reject_unauthenticated(parsed.path)
+                return
 
             if parsed.path == "/api/trades":
                 trade = create_trade(payload)
@@ -1679,6 +2278,10 @@ class StockRequestHandler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
 
         try:
+            if requires_authentication(parsed.path) and not self.get_authenticated_user():
+                self.reject_unauthenticated(parsed.path)
+                return
+
             payload = self.read_json_body()
 
             if parsed.path.startswith("/api/trades/"):
@@ -1709,6 +2312,10 @@ class StockRequestHandler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
 
         try:
+            if requires_authentication(parsed.path) and not self.get_authenticated_user():
+                self.reject_unauthenticated(parsed.path)
+                return
+
             if parsed.path.startswith("/api/trades/"):
                 trade_id = strip_prefix(parsed.path, "/api/trades/")
                 delete_trade(trade_id)
@@ -1756,11 +2363,96 @@ class StockRequestHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(content)
 
-    def send_json(self, payload, status=HTTPStatus.OK):
+    def get_authenticated_user(self):
+        bearer_user = get_authenticated_user_from_bearer(self.headers.get("Authorization", ""))
+        if bearer_user:
+            return bearer_user
+        return get_authenticated_user_from_cookie(self.headers.get("Cookie", ""))
+
+    def request_origin(self):
+        forwarded_proto = self.headers.get("X-Forwarded-Proto")
+        proto = (forwarded_proto.split(",")[0].strip() if forwarded_proto else "http") or "http"
+        host = self.headers.get("X-Forwarded-Host") or self.headers.get("Host")
+        return f"{proto}://{host}" if host else ""
+
+    def redirect_to_google_auth(self):
+        env_error = google_oauth_env_error()
+        if env_error:
+            self.send_json(env_error, status=HTTPStatus.SERVICE_UNAVAILABLE)
+            return
+        location, state = build_google_auth_url()
+        self.send_response(HTTPStatus.FOUND)
+        self.send_header("Location", location)
+        self.send_header("Set-Cookie", oauth_state_cookie(state))
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+
+    def handle_google_callback(self, query):
+        if query.get("error", [""])[0]:
+            self.send_json(
+                {
+                    "error": "Google 登入失敗：" + query.get("error", [""])[0],
+                    "fix": "請重新點選 Log in with Google；若持續失敗，請檢查 GCP OAuth consent screen 與 Authorized redirect URI。",
+                },
+                status=HTTPStatus.BAD_REQUEST,
+            )
+            return
+
+        code = query.get("code", [""])[0]
+        if not code:
+            self.send_json(
+                {"error": "Google callback 缺少 code", "fix": "請從 /login.html 點選 Log in with Google 重新登入。"},
+                status=HTTPStatus.BAD_REQUEST,
+            )
+            return
+
+        state = query.get("state", [""])[0]
+        cookie_state = get_oauth_state_from_cookie(self.headers.get("Cookie", ""))
+        if state and cookie_state and state != cookie_state:
+            self.send_json(
+                {"error": "Google OAuth state 驗證失敗", "fix": "請重新點選 Log in with Google；不要手動修改 callback URL。"},
+                status=HTTPStatus.BAD_REQUEST,
+            )
+            return
+
+        try:
+            tokens = exchange_google_code(code, get_redirect_uri())
+            profile = validate_google_profile(fetch_google_userinfo(tokens.get("access_token", "")))
+            session = create_authenticated_session(profile)
+        except ValueError as error:
+            self.send_json(
+                {"error": str(error), "fix": "請確認 GOOGLE_CLIENT_ID、GOOGLE_CLIENT_SECRET、REDIRECT_URI 與 GCP Authorized redirect URI 設定正確。"},
+                status=HTTPStatus.BAD_REQUEST,
+            )
+            return
+
+        user = {"email": session["email"], "name": session["name"], "picture": session["picture"]}
+        if query.get("return", [""])[0] == "json":
+            self.send_json({"user": user}, headers={"Set-Cookie": session["Set-Cookie"]})
+            return
+
+        self.send_response(HTTPStatus.FOUND)
+        self.send_header("Location", "/")
+        self.send_header("Set-Cookie", session["Set-Cookie"])
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+
+    def reject_unauthenticated(self, path):
+        if path.startswith("/api/"):
+            self.send_json({"error": "authentication_required"}, status=HTTPStatus.UNAUTHORIZED)
+            return
+        self.send_response(HTTPStatus.FOUND)
+        self.send_header("Location", "/login.html")
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+
+    def send_json(self, payload, status=HTTPStatus.OK, headers=None):
         body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
+        for name, value in (headers or {}).items():
+            self.send_header(name, value)
         self.end_headers()
         self.wfile.write(body)
 

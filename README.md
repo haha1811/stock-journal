@@ -13,9 +13,12 @@
 - Python：建議 `3.11+`
 - 作業系統：`Windows`、`Linux`
 - 主要依賴：Python 標準函式庫（目前不需額外安裝第三方套件）
+- Google OAuth：SaaS 登入版需要設定 `GOOGLE_CLIENT_ID`、`GOOGLE_CLIENT_SECRET`、`REDIRECT_URI`
 
 ## 目前功能
 
+- Google 帳號登入驗證，驗證成功後才可使用系統
+- 可用 email allowlist 或 Google Workspace 網域限制使用者
 - 新增 / 編輯 / 刪除買賣交易
 - 多帳戶欄位與帳戶切換
 - 帳戶管理頁面
@@ -140,12 +143,72 @@ STOCK_APP_HOST=0.0.0.0 STOCK_APP_PORT=8000 python3 server.py
 
 ## 環境變數
 
+### 服務綁定
+
 - `STOCK_APP_HOST`
   - 預設：`127.0.0.1`
   - 範例：`0.0.0.0`
 - `STOCK_APP_PORT`
   - 預設：`8000`
   - 範例：`8080`
+
+### Firebase Auth（Google Sign-In）
+
+可複製 `.env.example` 成 `.env`；`server.py` 會自動讀取專案根目錄的 `.env`。
+
+前端（可公開）必填：
+
+- `FIREBASE_API_KEY`
+- `FIREBASE_AUTH_DOMAIN`
+- `FIREBASE_PROJECT_ID`
+- `FIREBASE_APP_ID`
+
+前端（可公開）選填：
+
+- `FIREBASE_STORAGE_BUCKET`
+- `FIREBASE_MESSAGING_SENDER_ID`
+
+後端（不可公開）必填其一：
+
+- `FIREBASE_SERVICE_ACCOUNT_JSON`（Service Account JSON 檔案路徑）
+- 或使用主機上的 `GOOGLE_APPLICATION_CREDENTIALS` / GCP ADC
+
+相容保留（Phase A，舊 Google OAuth callback/session 流程）：
+
+- `GOOGLE_CLIENT_ID`
+- `GOOGLE_CLIENT_SECRET`
+- `REDIRECT_URI`
+
+其他選填：
+
+- `STOCK_ALLOWED_GOOGLE_EMAILS`：逗號分隔 email allowlist，例如 `user1@gmail.com,user2@gmail.com`。
+- `STOCK_ALLOWED_GOOGLE_DOMAIN`：限制 Google Workspace 網域，例如 `example.com`。
+- `STOCK_COOKIE_SECURE`：正式 HTTPS 部署建議設為 `true`，讓 session cookie 加上 `Secure`。
+
+## Firebase Auth 設定與測試（Phase A MVP）
+
+1. 到 Firebase Console 啟用 Authentication → Sign-in method → Google。
+2. 在 Project settings 取得 Web App config，填入 `.env` 的 `FIREBASE_*` 欄位。
+3. 在後端主機配置 Admin SDK 憑證：
+   - 建議使用 `FIREBASE_SERVICE_ACCOUNT_JSON=/abs/path/service-account.json`
+   - 憑證檔不可 commit
+4. 安裝後端驗證套件：
+
+```bash
+python3 -m pip install firebase-admin
+```
+
+5. 啟動 server：
+
+```bash
+python3 server.py
+```
+
+6. 測試流程：開啟 `http://localhost:8000/login.html` → 點 `Log in with Google` → 成功後導回 `/`。前端會將 Firebase ID Token 存到 localStorage，並由 `firebase-auth-bridge.js` 自動在 `/api/*` 請求加上 `Authorization: Bearer <token>`。
+
+7. 完整 smoke test 檢查清單請參考：
+
+- [`docs/oauth-smoke-test-checklist.md`](./docs/oauth-smoke-test-checklist.md)
 
 ## API 概念
 
