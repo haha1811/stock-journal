@@ -19,7 +19,7 @@
 ### Fixed
 - 待補充
 
-## [v0.3.0] - 2026-04-30
+## [v0.3.1] - 2026-04-30
 
 ### Added
 - Firebase Auth MVP：新增 Google 登入頁、前端 token bridge、後端 API 驗證守門與登出流程。
