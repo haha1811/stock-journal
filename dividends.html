@@ -20,13 +20,18 @@
           顯示目前持有 ETF 的股利記錄、預估金額與跨行扣款後實領。
         </p>
       </div>
-      <div class="hero-actions">
-        <a class="secondary-button nav-link" href="/index.html">交易頁</a>
-        <a class="secondary-button nav-link" href="/inventory.html">庫存頁</a>
-        <a class="secondary-button nav-link" href="/dividend-stats.html">股利統計</a>
-        <a class="secondary-button nav-link" href="/dividend-calendar.html">股利月曆</a>
-        <button id="refresh-dividend-button" class="secondary-button" type="button">手動更新股利</button>
-        <button id="logout-button" class="secondary-button logout-button" type="button">登出帳號</button>
+      <div class="hero-controls">
+        <div class="hero-actions">
+          <a class="secondary-button nav-link" href="/index.html">交易頁</a>
+          <a class="secondary-button nav-link" href="/inventory.html">庫存頁</a>
+          <a class="secondary-button nav-link" href="/dividend-stats.html">股利統計</a>
+          <a class="secondary-button nav-link" href="/dividend-calendar.html">股利月曆</a>
+          <button id="refresh-dividend-button" class="secondary-button" type="button">手動更新股利</button>
+        </div>
+        <div class="hero-session-actions">
+          <span id="current-user-badge" class="current-user-badge" title="目前登入帳號">登入中：讀取中…</span>
+          <button id="logout-button" class="secondary-button logout-button" type="button">登出帳號</button>
+        </div>
       </div>
     </header>
 

@@ -594,6 +594,88 @@ def strip_prefix(value, prefix):
     return value[len(prefix):] if value.startswith(prefix) else value
 
 
+def require_user_uid(user):
+    uid = str((user or {}).get("uid") or "").strip()
+    if not uid:
+        raise ValueError("authentication uid missing")
+    return uid
+
+
+def current_iso_now():
+    return datetime.now(TAIPEI_TZ).isoformat(timespec="seconds")
+
+
+def ensure_high_risk_confirmation(payload):
+    if not isinstance(payload, dict) or payload.get("confirm") != "YES":
+        raise ValueError("高風險操作需附帶 confirm=YES")
+
+
+def log_audit(actor_uid, owner_uid, action, entity_type, entity_id, payload=""):
+    data = payload if isinstance(payload, str) else json.dumps(payload, ensure_ascii=False)
+    with get_connection() as connection:
+        connection.execute(
+            """
+            INSERT INTO audit_logs (actor_uid, owner_uid, action, entity_type, entity_id, payload, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (actor_uid, owner_uid, action, entity_type, str(entity_id), data, current_iso_now()),
+        )
+        connection.commit()
+
+
+def list_audit_logs(owner_uid, limit=200):
+    with get_connection() as connection:
+        rows = connection.execute(
+            """
+            SELECT id, actor_uid, owner_uid, action, entity_type, entity_id, payload, created_at
+            FROM audit_logs
+            WHERE owner_uid = ?
+            ORDER BY id DESC
+            LIMIT ?
+            """,
+            (owner_uid, int(limit)),
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def append_trade_event(owner_uid, trade_id, event_type, snapshot, actor_uid):
+    with get_connection() as connection:
+        connection.execute(
+            """
+            INSERT INTO trade_events (trade_id, owner_uid, event_type, snapshot_json, actor_uid, created_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (trade_id, owner_uid, event_type, json.dumps(snapshot, ensure_ascii=False), actor_uid, current_iso_now()),
+        )
+        connection.commit()
+
+
+def upsert_user_permission(owner_uid, collaborator_uid, role):
+    role = str(role).strip().lower()
+    if role not in {"viewer", "editor"}:
+        raise ValueError("role 只接受 viewer 或 editor")
+    with get_connection() as connection:
+        connection.execute(
+            """
+            INSERT INTO user_permissions (owner_uid, collaborator_uid, role, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(owner_uid, collaborator_uid) DO UPDATE SET role = excluded.role, updated_at = excluded.updated_at
+            """,
+            (owner_uid, collaborator_uid, role, current_iso_now(), current_iso_now()),
+        )
+        connection.commit()
+    return {"owner_uid": owner_uid, "collaborator_uid": collaborator_uid, "role": role}
+
+
+def list_user_permissions(owner_uid):
+    with get_connection() as connection:
+        rows = connection.execute(
+            "SELECT owner_uid, collaborator_uid, role, created_at, updated_at FROM user_permissions WHERE owner_uid = ? ORDER BY collaborator_uid ASC",
+            (owner_uid,),
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
 def ensure_database():
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     with get_connection() as connection:
@@ -625,9 +707,11 @@ def ensure_database():
             """
             CREATE TABLE IF NOT EXISTS accounts (
                 id TEXT PRIMARY KEY,
-                name TEXT NOT NULL UNIQUE,
+                owner_uid TEXT NOT NULL DEFAULT '__legacy__',
+                name TEXT NOT NULL,
                 created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL
+                updated_at TEXT NOT NULL,
+                UNIQUE(owner_uid, name)
             )
             """
         )
@@ -635,6 +719,7 @@ def ensure_database():
             """
             CREATE TABLE IF NOT EXISTS trades (
                 id TEXT PRIMARY KEY,
+                owner_uid TEXT NOT NULL DEFAULT '__legacy__',
                 account TEXT NOT NULL DEFAULT '主帳戶',
                 settlement TEXT NOT NULL,
                 side TEXT NOT NULL,
@@ -667,12 +752,13 @@ def ensure_database():
         connection.execute(
             """
             CREATE TABLE IF NOT EXISTS holding_targets (
+                owner_uid TEXT NOT NULL DEFAULT '__legacy__',
                 account TEXT NOT NULL,
                 symbol TEXT NOT NULL,
                 target_sell_price REAL,
                 note TEXT NOT NULL DEFAULT '',
                 updated_at TEXT NOT NULL,
-                PRIMARY KEY (account, symbol)
+                PRIMARY KEY (owner_uid, account, symbol)
             )
             """
         )
@@ -693,13 +779,14 @@ def ensure_database():
         connection.execute(
             """
             CREATE TABLE IF NOT EXISTS dividend_adjustments (
+                owner_uid TEXT NOT NULL DEFAULT '__legacy__',
                 account TEXT NOT NULL,
                 symbol TEXT NOT NULL,
                 ex_dividend_date TEXT NOT NULL,
                 payment_date TEXT NOT NULL,
                 bank_fee REAL NOT NULL DEFAULT 0,
                 updated_at TEXT NOT NULL,
-                PRIMARY KEY (account, symbol, ex_dividend_date, payment_date)
+                PRIMARY KEY (owner_uid, account, symbol, ex_dividend_date, payment_date)
             )
             """
         )
@@ -721,9 +808,122 @@ def ensure_database():
             """
         )
 
+
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS user_permissions (
+                owner_uid TEXT NOT NULL,
+                collaborator_uid TEXT NOT NULL,
+                role TEXT NOT NULL CHECK(role IN ('viewer','editor')),
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY (owner_uid, collaborator_uid)
+            )
+            """
+        )
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS audit_logs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                actor_uid TEXT NOT NULL,
+                owner_uid TEXT NOT NULL,
+                action TEXT NOT NULL,
+                entity_type TEXT NOT NULL,
+                entity_id TEXT NOT NULL,
+                payload TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL
+            )
+            """
+        )
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS trade_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                trade_id TEXT NOT NULL,
+                owner_uid TEXT NOT NULL,
+                event_type TEXT NOT NULL,
+                snapshot_json TEXT NOT NULL,
+                actor_uid TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            )
+            """
+        )
+        account_columns = {row["name"] for row in connection.execute("PRAGMA table_info(accounts)").fetchall()}
+        if "owner_uid" not in account_columns:
+            connection.execute("ALTER TABLE accounts ADD COLUMN owner_uid TEXT NOT NULL DEFAULT '__legacy__'")
+
+        accounts_table_sql_row = connection.execute(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name='accounts'"
+        ).fetchone()
+        accounts_table_sql = (accounts_table_sql_row["sql"] or "") if accounts_table_sql_row else ""
+        if "name TEXT NOT NULL UNIQUE" in accounts_table_sql:
+            connection.execute("DROP TABLE IF EXISTS accounts_v2")
+            connection.execute(
+                """
+                CREATE TABLE accounts_v2 (
+                    id TEXT PRIMARY KEY,
+                    owner_uid TEXT NOT NULL DEFAULT '__legacy__',
+                    name TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    UNIQUE(owner_uid, name)
+                )
+                """
+            )
+            connection.execute(
+                """
+                INSERT INTO accounts_v2 (id, owner_uid, name, created_at, updated_at)
+                SELECT id, COALESCE(NULLIF(TRIM(owner_uid), ''), '__legacy__'), name, created_at, updated_at
+                FROM accounts
+                """
+            )
+            connection.execute("DROP TABLE accounts")
+            connection.execute("ALTER TABLE accounts_v2 RENAME TO accounts")
+
+        target_columns = {row["name"] for row in connection.execute("PRAGMA table_info(holding_targets)").fetchall()}
+        if "owner_uid" not in target_columns:
+            connection.execute("ALTER TABLE holding_targets ADD COLUMN owner_uid TEXT NOT NULL DEFAULT '__legacy__'")
+
+        manual_columns2 = {row["name"] for row in connection.execute("PRAGMA table_info(dividend_manual_events)").fetchall()}
+        if "owner_uid" not in manual_columns2:
+            connection.execute("ALTER TABLE dividend_manual_events ADD COLUMN owner_uid TEXT NOT NULL DEFAULT '__legacy__'")
+
+        adjust_columns = {row["name"] for row in connection.execute("PRAGMA table_info(dividend_adjustments)").fetchall()}
+        if "owner_uid" not in adjust_columns:
+            connection.execute("ALTER TABLE dividend_adjustments ADD COLUMN owner_uid TEXT NOT NULL DEFAULT '__legacy__'")
+
+        connection.execute(
+            """
+            DELETE FROM holding_targets
+            WHERE rowid NOT IN (
+                SELECT MAX(rowid)
+                FROM holding_targets
+                GROUP BY owner_uid, account, symbol
+            )
+            """
+        )
+        connection.execute(
+            """
+            DELETE FROM dividend_adjustments
+            WHERE rowid NOT IN (
+                SELECT MAX(rowid)
+                FROM dividend_adjustments
+                GROUP BY owner_uid, account, symbol, ex_dividend_date, payment_date
+            )
+            """
+        )
+        connection.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_holding_targets_owner_account_symbol ON holding_targets(owner_uid, account, symbol)"
+        )
+        connection.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_dividend_adjustments_owner_scope ON dividend_adjustments(owner_uid, account, symbol, ex_dividend_date, payment_date)"
+        )
+
         columns = {
             row["name"] for row in connection.execute("PRAGMA table_info(trades)").fetchall()
         }
+        if "owner_uid" not in columns:
+            connection.execute("ALTER TABLE trades ADD COLUMN owner_uid TEXT NOT NULL DEFAULT '__legacy__'")
         if "account" not in columns:
             connection.execute(
                 "ALTER TABLE trades ADD COLUMN account TEXT NOT NULL DEFAULT '主帳戶'"
@@ -754,8 +954,8 @@ def ensure_database():
         if "eligible_units" not in manual_columns:
             connection.execute("ALTER TABLE dividend_manual_events ADD COLUMN eligible_units INTEGER")
 
-        ensure_default_account(connection)
-        sync_accounts_from_trades(connection)
+        ensure_default_account(connection, owner_uid="__legacy__")
+        sync_accounts_from_trades(connection, owner_uid="__legacy__")
         connection.commit()
 
 
@@ -772,41 +972,42 @@ def calculate_tax(side, amount):
     return round(amount * 0.003) if side == "賣出" else 0
 
 
-def ensure_default_account(connection):
+def ensure_default_account(connection, owner_uid):
     now = datetime.now(TAIPEI_TZ).isoformat(timespec="seconds")
     connection.execute(
         """
-        INSERT INTO accounts (id, name, created_at, updated_at)
-        SELECT ?, ?, ?, ?
+        INSERT INTO accounts (id, owner_uid, name, created_at, updated_at)
+        SELECT ?, ?, ?, ?, ?
         WHERE NOT EXISTS (
-            SELECT 1 FROM accounts WHERE name = ?
+            SELECT 1 FROM accounts WHERE owner_uid = ? AND name = ?
         )
         """,
-        ("default-account", "主帳戶", now, now, "主帳戶"),
+        (f"{owner_uid}-default-account", owner_uid, "主帳戶", now, now, owner_uid, "主帳戶"),
     )
 
 
-def sync_accounts_from_trades(connection):
+def sync_accounts_from_trades(connection, owner_uid):
     now = datetime.now(TAIPEI_TZ).isoformat(timespec="seconds")
     rows = connection.execute(
         """
         SELECT DISTINCT account
         FROM trades
-        WHERE account IS NOT NULL AND TRIM(account) <> ''
-        """
+        WHERE owner_uid = ? AND account IS NOT NULL AND TRIM(account) <> ''
+        """,
+        (owner_uid,),
     ).fetchall()
 
     for row in rows:
         name = row["account"].strip()
         connection.execute(
             """
-            INSERT INTO accounts (id, name, created_at, updated_at)
-            SELECT ?, ?, ?, ?
+            INSERT INTO accounts (id, owner_uid, name, created_at, updated_at)
+            SELECT ?, ?, ?, ?, ?
             WHERE NOT EXISTS (
-                SELECT 1 FROM accounts WHERE name = ?
+                SELECT 1 FROM accounts WHERE owner_uid = ? AND name = ?
             )
             """,
-            (create_trade_id(), name, now, now, name),
+            (create_trade_id(), owner_uid, name, now, now, owner_uid, name),
         )
 
 
@@ -885,25 +1086,28 @@ def create_trade_id():
     return datetime.now(TAIPEI_TZ).strftime("%Y%m%d%H%M%S%f")
 
 
-def list_accounts():
+def list_accounts(owner_uid):
+    ensure_account_exists("主帳戶", owner_uid)
+
     with get_connection() as connection:
         rows = connection.execute(
             """
             SELECT id, name
             FROM accounts
+            WHERE owner_uid = ?
             ORDER BY CASE WHEN name = '主帳戶' THEN 0 ELSE 1 END, name ASC
             """
-        ).fetchall()
+        , (owner_uid,)).fetchall()
     return [dict(row) for row in rows]
 
 
-def ensure_account_exists(account_name):
+def ensure_account_exists(account_name, owner_uid):
     normalized_name = str(account_name).strip() or "主帳戶"
 
     with get_connection() as connection:
         row = connection.execute(
-            "SELECT id, name FROM accounts WHERE name = ?",
-            (normalized_name,),
+            "SELECT id, name FROM accounts WHERE owner_uid = ? AND name = ?",
+            (owner_uid, normalized_name),
         ).fetchone()
         if row:
             return dict(row)
@@ -912,23 +1116,23 @@ def ensure_account_exists(account_name):
         account = {"id": create_trade_id(), "name": normalized_name}
         connection.execute(
             """
-            INSERT INTO accounts (id, name, created_at, updated_at)
-            VALUES (?, ?, ?, ?)
+            INSERT INTO accounts (id, owner_uid, name, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?)
             """,
-            (account["id"], account["name"], now, now),
+            (account["id"], owner_uid, account["name"], now, now),
         )
         connection.commit()
         return account
 
 
-def create_account(payload):
+def create_account(payload, owner_uid):
     name = str(payload.get("name", "")).strip()
     if not name:
         raise ValueError("帳戶名稱不可為空")
-    return ensure_account_exists(name)
+    return ensure_account_exists(name, owner_uid)
 
 
-def update_account(account_id, payload):
+def update_account(account_id, payload, owner_uid):
     new_name = str(payload.get("name", "")).strip()
     if not new_name:
         raise ValueError("帳戶名稱不可為空")
@@ -937,52 +1141,52 @@ def update_account(account_id, payload):
 
     with get_connection() as connection:
         existing = connection.execute(
-            "SELECT id, name FROM accounts WHERE id = ?",
-            (account_id,),
+            "SELECT id, name FROM accounts WHERE owner_uid = ? AND id = ?",
+            (owner_uid, account_id),
         ).fetchone()
         if not existing:
             raise LookupError("找不到要更新的帳戶")
 
         duplicate = connection.execute(
-            "SELECT id FROM accounts WHERE name = ? AND id <> ?",
-            (new_name, account_id),
+            "SELECT id FROM accounts WHERE owner_uid = ? AND name = ? AND id <> ?",
+            (owner_uid, new_name, account_id),
         ).fetchone()
         if duplicate:
             raise ValueError("帳戶名稱已存在")
 
         old_name = existing["name"]
         connection.execute(
-            "UPDATE accounts SET name = ?, updated_at = ? WHERE id = ?",
-            (new_name, now, account_id),
+            "UPDATE accounts SET name = ?, updated_at = ? WHERE owner_uid = ? AND id = ?",
+            (new_name, now, owner_uid, account_id),
         )
         connection.execute(
-            "UPDATE trades SET account = ?, updated_at = ? WHERE account = ?",
-            (new_name, now, old_name),
+            "UPDATE trades SET account = ?, updated_at = ? WHERE owner_uid = ? AND account = ?",
+            (new_name, now, owner_uid, old_name),
         )
         connection.execute(
             """
-            INSERT INTO holding_targets (account, symbol, target_sell_price, note, updated_at)
-            SELECT ?, symbol, target_sell_price, note, ?
+            INSERT INTO holding_targets (owner_uid, account, symbol, target_sell_price, note, updated_at)
+            SELECT owner_uid, ?, symbol, target_sell_price, note, ?
             FROM holding_targets
-            WHERE account = ?
-            ON CONFLICT(account, symbol) DO UPDATE SET
+            WHERE owner_uid = ? AND account = ?
+            ON CONFLICT(owner_uid, account, symbol) DO UPDATE SET
                 target_sell_price = excluded.target_sell_price,
                 note = excluded.note,
                 updated_at = excluded.updated_at
             """,
-            (new_name, now, old_name),
+            (new_name, now, owner_uid, old_name),
         )
-        connection.execute("DELETE FROM holding_targets WHERE account = ?", (old_name,))
+        connection.execute("DELETE FROM holding_targets WHERE owner_uid = ? AND account = ?", (owner_uid, old_name))
         connection.commit()
 
     return {"id": account_id, "name": new_name}
 
 
-def delete_account(account_id):
+def delete_account(account_id, owner_uid):
     with get_connection() as connection:
         existing = connection.execute(
-            "SELECT id, name FROM accounts WHERE id = ?",
-            (account_id,),
+            "SELECT id, name FROM accounts WHERE owner_uid = ? AND id = ?",
+            (owner_uid, account_id),
         ).fetchone()
         if not existing:
             raise LookupError("找不到要刪除的帳戶")
@@ -991,46 +1195,48 @@ def delete_account(account_id):
             raise ValueError("主帳戶不可刪除")
 
         usage = connection.execute(
-            "SELECT COUNT(*) AS count FROM trades WHERE account = ?",
-            (existing["name"],),
+            "SELECT COUNT(*) AS count FROM trades WHERE owner_uid = ? AND account = ?",
+            (owner_uid, existing["name"]),
         ).fetchone()
         if usage["count"] > 0:
             raise ValueError("此帳戶仍有交易資料，請先移轉或刪除相關交易")
 
         connection.execute(
-            "DELETE FROM holding_targets WHERE account = ?",
-            (existing["name"],),
+            "DELETE FROM holding_targets WHERE owner_uid = ? AND account = ?",
+            (owner_uid, existing["name"]),
         )
-        connection.execute("DELETE FROM accounts WHERE id = ?", (account_id,))
+        connection.execute("DELETE FROM accounts WHERE owner_uid = ? AND id = ?", (owner_uid, account_id))
         connection.commit()
 
 
-def list_trades():
+def list_trades(owner_uid):
     with get_connection() as connection:
         rows = connection.execute(
             """
             SELECT id, account, settlement, side, date, year, symbol, name, quantity, price, amount, fee, tax, note
             FROM trades
+            WHERE owner_uid = ?
             ORDER BY date DESC, created_at DESC
             """
-        ).fetchall()
+        , (owner_uid,)).fetchall()
     return [dict(row) for row in rows]
 
 
-def create_trade(payload):
+def create_trade(payload, owner_uid):
     trade = normalize_trade_payload(payload)
-    ensure_account_exists(trade["account"])
+    ensure_account_exists(trade["account"], owner_uid)
     now = datetime.now(TAIPEI_TZ).isoformat(timespec="seconds")
 
     with get_connection() as connection:
         connection.execute(
             """
             INSERT INTO trades (
-                id, account, settlement, side, date, year, symbol, name, quantity, price, amount, fee, tax, note, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                id, owner_uid, account, settlement, side, date, year, symbol, name, quantity, price, amount, fee, tax, note, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 trade["id"],
+                owner_uid,
                 trade["account"],
                 trade["settlement"],
                 trade["side"],
@@ -1053,9 +1259,9 @@ def create_trade(payload):
     return trade
 
 
-def update_trade(trade_id, payload):
+def update_trade(trade_id, payload, owner_uid):
     trade = normalize_trade_payload(payload, existing_id=trade_id)
-    ensure_account_exists(trade["account"])
+    ensure_account_exists(trade["account"], owner_uid)
     now = datetime.now(TAIPEI_TZ).isoformat(timespec="seconds")
 
     with get_connection() as connection:
@@ -1063,7 +1269,7 @@ def update_trade(trade_id, payload):
             """
             UPDATE trades
             SET account = ?, settlement = ?, side = ?, date = ?, year = ?, symbol = ?, name = ?, quantity = ?, price = ?, amount = ?, fee = ?, tax = ?, note = ?, updated_at = ?
-            WHERE id = ?
+            WHERE owner_uid = ? AND id = ?
             """,
             (
                 trade["account"],
@@ -1080,6 +1286,7 @@ def update_trade(trade_id, payload):
                 trade["tax"],
                 trade["note"],
                 now,
+                owner_uid,
                 trade_id,
             ),
         )
@@ -1091,16 +1298,16 @@ def update_trade(trade_id, payload):
     return trade
 
 
-def delete_trade(trade_id):
+def delete_trade(trade_id, owner_uid):
     with get_connection() as connection:
-        cursor = connection.execute("DELETE FROM trades WHERE id = ?", (trade_id,))
+        cursor = connection.execute("DELETE FROM trades WHERE owner_uid = ? AND id = ?", (owner_uid, trade_id))
         connection.commit()
 
     if cursor.rowcount == 0:
         raise LookupError("找不到要刪除的交易")
 
 
-def replace_trades(items):
+def replace_trades(items, owner_uid):
     if not isinstance(items, list):
         raise ValueError("匯入資料必須為陣列")
 
@@ -1108,17 +1315,18 @@ def replace_trades(items):
     now = datetime.now(TAIPEI_TZ).isoformat(timespec="seconds")
 
     with get_connection() as connection:
-        ensure_default_account(connection)
-        connection.execute("DELETE FROM trades")
+        ensure_default_account(connection, owner_uid)
+        connection.execute("DELETE FROM trades WHERE owner_uid = ?", (owner_uid,))
         connection.executemany(
             """
             INSERT INTO trades (
-                id, account, settlement, side, date, year, symbol, name, quantity, price, amount, fee, tax, note, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                id, owner_uid, account, settlement, side, date, year, symbol, name, quantity, price, amount, fee, tax, note, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             [
                 (
                     trade["id"],
+                    owner_uid,
                     trade["account"],
                     trade["settlement"],
                     trade["side"],
@@ -1138,7 +1346,7 @@ def replace_trades(items):
                 for trade in normalized
             ],
         )
-        sync_accounts_from_trades(connection)
+        sync_accounts_from_trades(connection, owner_uid)
         connection.commit()
 
     return normalized
@@ -1151,24 +1359,27 @@ def get_quote_map(connection):
     return {row["symbol"]: dict(row) for row in rows}
 
 
-def get_target_map(connection):
+def get_target_map(connection, owner_uid):
     rows = connection.execute(
-        "SELECT account, symbol, target_sell_price, note, updated_at FROM holding_targets"
+        "SELECT account, symbol, target_sell_price, note, updated_at FROM holding_targets WHERE owner_uid = ?",
+        (owner_uid,),
     ).fetchall()
     return {(row["account"], row["symbol"]): dict(row) for row in rows}
 
 
-def compute_inventory_items():
+def compute_inventory_items(owner_uid):
     with get_connection() as connection:
         trades = connection.execute(
             """
             SELECT account, symbol, name, side, quantity, amount, fee, tax, date, created_at
             FROM trades
+            WHERE owner_uid = ?
             ORDER BY date ASC, created_at ASC
-            """
+            """,
+            (owner_uid,),
         ).fetchall()
         quote_map = get_quote_map(connection)
-        target_map = get_target_map(connection)
+        target_map = get_target_map(connection, owner_uid)
 
     positions = {}
     for trade in trades:
@@ -1260,8 +1471,8 @@ def compute_inventory_items():
     return items
 
 
-def list_inventory(account_filter="ALL"):
-    items = compute_inventory_items()
+def list_inventory(account_filter="ALL", owner_uid="__legacy__"):
+    items = compute_inventory_items(owner_uid)
     if account_filter and account_filter != "ALL":
         items = [item for item in items if item["account"] == account_filter]
 
@@ -1280,13 +1491,13 @@ def list_inventory(account_filter="ALL"):
     return {"items": items, "summary": summary}
 
 
-def save_inventory_target(payload):
+def save_inventory_target(payload, owner_uid):
     account = str(payload.get("account", "")).strip()
     symbol = str(payload.get("symbol", "")).strip()
     if not account or not symbol:
         raise ValueError("account 與 symbol 不可為空")
 
-    ensure_account_exists(account)
+    ensure_account_exists(account, owner_uid)
 
     raw_target = payload.get("target_sell_price")
     target_price = None if raw_target in (None, "", "null") else round(float(raw_target), 2)
@@ -1299,14 +1510,14 @@ def save_inventory_target(payload):
     with get_connection() as connection:
         connection.execute(
             """
-            INSERT INTO holding_targets (account, symbol, target_sell_price, note, updated_at)
-            VALUES (?, ?, ?, ?, ?)
-            ON CONFLICT(account, symbol) DO UPDATE SET
+            INSERT INTO holding_targets (owner_uid, account, symbol, target_sell_price, note, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(owner_uid, account, symbol) DO UPDATE SET
                 target_sell_price = excluded.target_sell_price,
                 note = excluded.note,
                 updated_at = excluded.updated_at
             """,
-            (account, symbol, target_price, note, now),
+            (owner_uid, account, symbol, target_price, note, now),
         )
         connection.commit()
 
@@ -1319,14 +1530,14 @@ def save_inventory_target(payload):
     }
 
 
-def bulk_apply_target_percentage(payload):
+def bulk_apply_target_percentage(payload, owner_uid):
     percentage = float(payload.get("percentage", 0))
     if percentage <= 0:
         raise ValueError("百分比必須大於 0")
 
     account_filter = str(payload.get("account", "ALL")).strip() or "ALL"
     only_empty_targets = bool(payload.get("only_empty_targets", False))
-    inventory_items = list_inventory(account_filter)["items"]
+    inventory_items = list_inventory(account_filter, owner_uid)["items"]
     if not inventory_items:
         return {"updated_count": 0, "percentage": percentage, "only_empty_targets": only_empty_targets}
 
@@ -1339,13 +1550,14 @@ def bulk_apply_target_percentage(payload):
             target_price = round(item["avg_price"] * (percentage / 100), 2)
             connection.execute(
                 """
-                INSERT INTO holding_targets (account, symbol, target_sell_price, note, updated_at)
-                VALUES (?, ?, ?, ?, ?)
-                ON CONFLICT(account, symbol) DO UPDATE SET
+                INSERT INTO holding_targets (owner_uid, account, symbol, target_sell_price, note, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(owner_uid, account, symbol) DO UPDATE SET
                     target_sell_price = excluded.target_sell_price,
                     updated_at = excluded.updated_at
                 """,
                 (
+                    owner_uid,
                     item["account"],
                     item["symbol"],
                     target_price,
@@ -1494,16 +1706,16 @@ def refresh_dividend_events(force=False):
     return {"updated_count": len(items)}
 
 
-def compute_position_until(ex_dividend_date):
+def compute_position_until(ex_dividend_date, owner_uid):
     with get_connection() as connection:
         trades = connection.execute(
             """
             SELECT account, symbol, name, side, quantity, amount, fee, tax, date, created_at
             FROM trades
-            WHERE date < ?
+            WHERE owner_uid = ? AND date < ?
             ORDER BY date ASC, created_at ASC
             """,
-            (ex_dividend_date,),
+            (owner_uid, ex_dividend_date),
         ).fetchall()
 
     positions = {}
@@ -1595,7 +1807,7 @@ def build_dividend_record(event, account, position, adjustment_map):
     }
 
 
-def list_dividend_records(account_filter="ALL"):
+def list_dividend_records(account_filter="ALL", owner_uid="__legacy__"):
     with get_connection() as connection:
         official_events = connection.execute(
             """
@@ -1608,14 +1820,18 @@ def list_dividend_records(account_filter="ALL"):
             """
             SELECT id, account, symbol, name, ex_dividend_date, payment_date, eligible_units, cash_dividend_per_unit, avg_price, yield_rate, updated_at
             FROM dividend_manual_events
+            WHERE owner_uid = ?
             ORDER BY ex_dividend_date DESC, symbol ASC
-            """
+            """,
+            (owner_uid,),
         ).fetchall()
         adjustments = connection.execute(
             """
             SELECT account, symbol, ex_dividend_date, payment_date, bank_fee, updated_at
             FROM dividend_adjustments
-            """
+            WHERE owner_uid = ?
+            """,
+            (owner_uid,),
         ).fetchall()
 
     adjustment_map = {
@@ -1647,7 +1863,7 @@ def list_dividend_records(account_filter="ALL"):
     ]
 
     for event in all_events:
-        positions = compute_position_until(event["ex_dividend_date"])
+        positions = compute_position_until(event["ex_dividend_date"], owner_uid)
         if event["source"] == "manual":
             account = event["account"]
             if account_filter != "ALL" and account != account_filter:
@@ -1711,7 +1927,7 @@ def validate_dividend_event_fields(
         raise ValueError("殖利率不可小於 0")
 
 
-def create_manual_dividend_event(payload):
+def create_manual_dividend_event(payload, owner_uid):
     account = str(payload.get("account", "")).strip() or "主帳戶"
     symbol = str(payload.get("symbol", "")).strip()
     name = str(payload.get("name", "")).strip()
@@ -1739,7 +1955,7 @@ def create_manual_dividend_event(payload):
         avg_price,
         yield_rate,
     )
-    ensure_account_exists(account)
+    ensure_account_exists(account, owner_uid)
 
     event_id = create_trade_id()
     updated_at = datetime.now(TAIPEI_TZ).isoformat(timespec="seconds")
@@ -1747,11 +1963,12 @@ def create_manual_dividend_event(payload):
         connection.execute(
             """
             INSERT INTO dividend_manual_events (
-                id, account, symbol, name, ex_dividend_date, payment_date, eligible_units, cash_dividend_per_unit, avg_price, yield_rate, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                id, owner_uid, account, symbol, name, ex_dividend_date, payment_date, eligible_units, cash_dividend_per_unit, avg_price, yield_rate, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 event_id,
+                owner_uid,
                 account,
                 symbol,
                 name,
@@ -1781,7 +1998,7 @@ def create_manual_dividend_event(payload):
     }
 
 
-def update_manual_dividend_event(event_id, payload):
+def update_manual_dividend_event(event_id, payload, owner_uid):
     account = str(payload.get("account", "")).strip() or "主帳戶"
     symbol = str(payload.get("symbol", "")).strip()
     name = str(payload.get("name", "")).strip()
@@ -1809,7 +2026,7 @@ def update_manual_dividend_event(event_id, payload):
         avg_price,
         yield_rate,
     )
-    ensure_account_exists(account)
+    ensure_account_exists(account, owner_uid)
 
     updated_at = datetime.now(TAIPEI_TZ).isoformat(timespec="seconds")
     with get_connection() as connection:
@@ -1817,9 +2034,9 @@ def update_manual_dividend_event(event_id, payload):
             """
             SELECT account, symbol, ex_dividend_date, payment_date
             FROM dividend_manual_events
-            WHERE id = ?
+            WHERE owner_uid = ? AND id = ?
             """,
-            (event_id,),
+            (owner_uid, event_id),
         ).fetchone()
         if not original_event:
             raise LookupError("找不到要更新的手動股利資料")
@@ -1828,7 +2045,7 @@ def update_manual_dividend_event(event_id, payload):
             """
             UPDATE dividend_manual_events
             SET account = ?, symbol = ?, name = ?, ex_dividend_date = ?, payment_date = ?, eligible_units = ?, cash_dividend_per_unit = ?, avg_price = ?, yield_rate = ?, updated_at = ?
-            WHERE id = ?
+            WHERE owner_uid = ? AND id = ?
             """,
             (
                 account,
@@ -1841,6 +2058,7 @@ def update_manual_dividend_event(event_id, payload):
                 avg_price,
                 yield_rate,
                 updated_at,
+                owner_uid,
                 event_id,
             ),
         )
@@ -1853,9 +2071,10 @@ def update_manual_dividend_event(event_id, payload):
             connection.execute(
                 """
                 DELETE FROM dividend_adjustments
-                WHERE account = ? AND symbol = ? AND ex_dividend_date = ? AND payment_date = ?
+                WHERE owner_uid = ? AND account = ? AND symbol = ? AND ex_dividend_date = ? AND payment_date = ?
                 """,
                 (
+                    owner_uid,
                     original_event["account"],
                     original_event["symbol"],
                     original_event["ex_dividend_date"],
@@ -1882,31 +2101,31 @@ def update_manual_dividend_event(event_id, payload):
     }
 
 
-def delete_manual_dividend_event(event_id):
+def delete_manual_dividend_event(event_id, owner_uid):
     with get_connection() as connection:
         event = connection.execute(
             """
             SELECT account, symbol, ex_dividend_date, payment_date
             FROM dividend_manual_events
-            WHERE id = ?
+            WHERE owner_uid = ? AND id = ?
             """,
-            (event_id,),
+            (owner_uid, event_id),
         ).fetchone()
         if not event:
             raise LookupError("找不到要刪除的手動股利資料")
 
-        connection.execute("DELETE FROM dividend_manual_events WHERE id = ?", (event_id,))
+        connection.execute("DELETE FROM dividend_manual_events WHERE owner_uid = ? AND id = ?", (owner_uid, event_id))
         connection.execute(
             """
             DELETE FROM dividend_adjustments
-            WHERE account = ? AND symbol = ? AND ex_dividend_date = ? AND payment_date = ?
+            WHERE owner_uid = ? AND account = ? AND symbol = ? AND ex_dividend_date = ? AND payment_date = ?
             """,
-            (event["account"], event["symbol"], event["ex_dividend_date"], event["payment_date"]),
+            (owner_uid, event["account"], event["symbol"], event["ex_dividend_date"], event["payment_date"]),
         )
         connection.commit()
 
 
-def save_dividend_adjustment(payload):
+def save_dividend_adjustment(payload, owner_uid):
     account = str(payload.get("account", "")).strip()
     symbol = str(payload.get("symbol", "")).strip()
     ex_dividend_date = str(payload.get("ex_dividend_date", "")).strip()
@@ -1922,13 +2141,13 @@ def save_dividend_adjustment(payload):
     with get_connection() as connection:
         connection.execute(
             """
-            INSERT INTO dividend_adjustments (account, symbol, ex_dividend_date, payment_date, bank_fee, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?)
-            ON CONFLICT(account, symbol, ex_dividend_date, payment_date) DO UPDATE SET
+            INSERT INTO dividend_adjustments (owner_uid, account, symbol, ex_dividend_date, payment_date, bank_fee, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(owner_uid, account, symbol, ex_dividend_date, payment_date) DO UPDATE SET
                 bank_fee = excluded.bank_fee,
                 updated_at = excluded.updated_at
             """,
-            (account, symbol, ex_dividend_date, payment_date, bank_fee, now),
+            (owner_uid, account, symbol, ex_dividend_date, payment_date, bank_fee, now),
         )
         connection.commit()
 
@@ -2166,21 +2385,36 @@ class StockRequestHandler(BaseHTTPRequestHandler):
                 return
 
             if parsed.path == "/api/trades":
-                self.send_json({"items": list_trades()})
+                owner_uid = require_user_uid(self.get_authenticated_user())
+                self.send_json({"items": list_trades(owner_uid)})
                 return
 
             if parsed.path == "/api/accounts":
-                self.send_json({"items": list_accounts()})
+                owner_uid = require_user_uid(self.get_authenticated_user())
+                self.send_json({"items": list_accounts(owner_uid)})
+                return
+
+            if parsed.path == "/api/permissions":
+                owner_uid = require_user_uid(self.get_authenticated_user())
+                self.send_json({"items": list_user_permissions(owner_uid)})
+                return
+
+            if parsed.path == "/api/audit":
+                owner_uid = require_user_uid(self.get_authenticated_user())
+                limit = int(query.get("limit", ["200"])[0])
+                self.send_json({"items": list_audit_logs(owner_uid, limit=limit)})
                 return
 
             if parsed.path == "/api/inventory":
                 account = query.get("account", ["ALL"])[0]
-                self.send_json(list_inventory(account))
+                owner_uid = require_user_uid(self.get_authenticated_user())
+                self.send_json(list_inventory(account, owner_uid))
                 return
 
             if parsed.path == "/api/dividends":
                 account = query.get("account", ["ALL"])[0]
-                self.send_json(list_dividend_records(account))
+                owner_uid = require_user_uid(self.get_authenticated_user())
+                self.send_json(list_dividend_records(account, owner_uid))
                 return
 
             if parsed.path in STATIC_FILES:
@@ -2223,37 +2457,56 @@ class StockRequestHandler(BaseHTTPRequestHandler):
                 return
 
             if parsed.path == "/api/trades":
-                trade = create_trade(payload)
+                owner_uid = require_user_uid(self.get_authenticated_user())
+                trade = create_trade(payload, owner_uid)
+                append_trade_event(owner_uid, trade["id"], "created", trade, owner_uid)
+                log_audit(owner_uid, owner_uid, "trade.create", "trade", trade["id"], trade)
                 self.send_json({"item": trade}, status=HTTPStatus.CREATED)
                 return
 
             if parsed.path == "/api/trades/import":
-                items = replace_trades(payload.get("items"))
+                owner_uid = require_user_uid(self.get_authenticated_user())
+                ensure_high_risk_confirmation(payload)
+                items = replace_trades(payload.get("items"), owner_uid)
+                log_audit(owner_uid, owner_uid, "trade.import_replace", "trade", "bulk", {"count": len(items)})
                 self.send_json({"items": items})
                 return
 
             if parsed.path == "/api/accounts":
-                account = create_account(payload)
+                owner_uid = require_user_uid(self.get_authenticated_user())
+                account = create_account(payload, owner_uid)
+                log_audit(owner_uid, owner_uid, "account.create", "account", account["id"], account)
                 self.send_json({"item": account}, status=HTTPStatus.CREATED)
                 return
 
+            if parsed.path == "/api/permissions":
+                owner_uid = require_user_uid(self.get_authenticated_user())
+                item = upsert_user_permission(owner_uid, str(payload.get("collaborator_uid", "")).strip(), payload.get("role", "viewer"))
+                log_audit(owner_uid, owner_uid, "permission.upsert", "permission", item["collaborator_uid"], item)
+                self.send_json({"item": item}, status=HTTPStatus.CREATED)
+                return
+
             if parsed.path == "/api/inventory/target":
-                item = save_inventory_target(payload)
+                owner_uid = require_user_uid(self.get_authenticated_user())
+                item = save_inventory_target(payload, owner_uid)
                 self.send_json({"item": item})
                 return
 
             if parsed.path == "/api/dividends/adjustment":
-                item = save_dividend_adjustment(payload)
+                owner_uid = require_user_uid(self.get_authenticated_user())
+                item = save_dividend_adjustment(payload, owner_uid)
                 self.send_json({"item": item})
                 return
 
             if parsed.path == "/api/dividends/manual":
-                item = create_manual_dividend_event(payload)
+                owner_uid = require_user_uid(self.get_authenticated_user())
+                item = create_manual_dividend_event(payload, owner_uid)
                 self.send_json({"item": item}, status=HTTPStatus.CREATED)
                 return
 
             if parsed.path == "/api/inventory/target/bulk":
-                result = bulk_apply_target_percentage(payload)
+                owner_uid = require_user_uid(self.get_authenticated_user())
+                result = bulk_apply_target_percentage(payload, owner_uid)
                 self.send_json(result)
                 return
 
@@ -2286,19 +2539,25 @@ class StockRequestHandler(BaseHTTPRequestHandler):
 
             if parsed.path.startswith("/api/trades/"):
                 trade_id = strip_prefix(parsed.path, "/api/trades/")
-                trade = update_trade(trade_id, payload)
+                owner_uid = require_user_uid(self.get_authenticated_user())
+                trade = update_trade(trade_id, payload, owner_uid)
+                append_trade_event(owner_uid, trade_id, "updated", trade, owner_uid)
+                log_audit(owner_uid, owner_uid, "trade.update", "trade", trade_id, trade)
                 self.send_json({"item": trade})
                 return
 
             if parsed.path.startswith("/api/accounts/"):
                 account_id = strip_prefix(parsed.path, "/api/accounts/")
-                account = update_account(account_id, payload)
+                owner_uid = require_user_uid(self.get_authenticated_user())
+                account = update_account(account_id, payload, owner_uid)
+                log_audit(owner_uid, owner_uid, "account.update", "account", account_id, account)
                 self.send_json({"item": account})
                 return
 
             if parsed.path.startswith("/api/dividends/manual/"):
                 event_id = strip_prefix(parsed.path, "/api/dividends/manual/")
-                item = update_manual_dividend_event(event_id, payload)
+                owner_uid = require_user_uid(self.get_authenticated_user())
+                item = update_manual_dividend_event(event_id, payload, owner_uid)
                 self.send_json({"item": item})
                 return
 
@@ -2318,19 +2577,26 @@ class StockRequestHandler(BaseHTTPRequestHandler):
 
             if parsed.path.startswith("/api/trades/"):
                 trade_id = strip_prefix(parsed.path, "/api/trades/")
-                delete_trade(trade_id)
+                owner_uid = require_user_uid(self.get_authenticated_user())
+                ensure_high_risk_confirmation({"confirm": self.headers.get("X-Confirm", "")})
+                delete_trade(trade_id, owner_uid)
+                log_audit(owner_uid, owner_uid, "trade.delete", "trade", trade_id, {"deleted": True})
                 self.send_json({"deleted": True})
                 return
 
             if parsed.path.startswith("/api/accounts/"):
                 account_id = strip_prefix(parsed.path, "/api/accounts/")
-                delete_account(account_id)
+                owner_uid = require_user_uid(self.get_authenticated_user())
+                ensure_high_risk_confirmation({"confirm": self.headers.get("X-Confirm", "")})
+                delete_account(account_id, owner_uid)
+                log_audit(owner_uid, owner_uid, "account.delete", "account", account_id, {"deleted": True})
                 self.send_json({"deleted": True})
                 return
 
             if parsed.path.startswith("/api/dividends/manual/"):
                 event_id = strip_prefix(parsed.path, "/api/dividends/manual/")
-                delete_manual_dividend_event(event_id)
+                owner_uid = require_user_uid(self.get_authenticated_user())
+                delete_manual_dividend_event(event_id, owner_uid)
                 self.send_json({"deleted": True})
                 return
 
@@ -2360,6 +2626,10 @@ class StockRequestHandler(BaseHTTPRequestHandler):
         self.send_response(HTTPStatus.OK)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(content)))
+        # 避免舊版前端 JS/CSS 被快取造成登入後重導迴圈
+        self.send_header("Cache-Control", "no-store, no-cache, must-revalidate")
+        self.send_header("Pragma", "no-cache")
+        self.send_header("Expires", "0")
         self.end_headers()
         self.wfile.write(content)
 

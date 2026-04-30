@@ -70,7 +70,13 @@ async function requestJson(url, options = {}) {
   const payload = await response.json().catch(() => ({}));
 
   if (!response.ok) {
-    throw new Error(payload.error || "系統發生錯誤");
+    const errorCode = payload.error || "系統發生錯誤";
+
+    if (response.status === 401 && errorCode === "authentication_required") {
+      window.location.href = "/login.html";
+    }
+
+    throw new Error(errorCode);
   }
 
   return payload;
@@ -506,7 +512,10 @@ function renderAccountTable() {
       }
 
       try {
-        await requestJson(`/api/accounts/${account.id}`, { method: "DELETE" });
+        await requestJson(`/api/accounts/${account.id}`, {
+          method: "DELETE",
+          headers: { "X-Confirm": "YES" },
+        });
         if (state.editingAccountId === account.id) {
           resetAccountForm();
         }
@@ -596,7 +605,10 @@ async function handleDeleteTrade(tradeId) {
   }
 
   try {
-    await requestJson(`/api/trades/${tradeId}`, { method: "DELETE" });
+    await requestJson(`/api/trades/${tradeId}`, {
+      method: "DELETE",
+      headers: { "X-Confirm": "YES" },
+    });
     state.trades = state.trades.filter((item) => item.id !== tradeId);
 
     if (state.editingTradeId === tradeId) {

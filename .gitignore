@@ -10,6 +10,9 @@ data/
 node_modules/
 .env
 !.env.example
+backups/
+secrets/
+firebase-auth-debug.log
 .DS_Store
 Thumbs.db
 release-v*.md

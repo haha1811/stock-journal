@@ -40,11 +40,26 @@ function onLoginPage() {
 }
 
 function isRedirectingFlagSet() {
-  return sessionStorage.getItem(REDIRECTING_KEY) === "1";
+  const raw = sessionStorage.getItem(REDIRECTING_KEY);
+  if (!raw) return false;
+
+  const ts = Number(raw);
+  if (!Number.isFinite(ts)) {
+    sessionStorage.removeItem(REDIRECTING_KEY);
+    return false;
+  }
+
+  const ageMs = Date.now() - ts;
+  if (ageMs > 8000) {
+    sessionStorage.removeItem(REDIRECTING_KEY);
+    return false;
+  }
+
+  return true;
 }
 
 function markRedirecting() {
-  sessionStorage.setItem(REDIRECTING_KEY, "1");
+  sessionStorage.setItem(REDIRECTING_KEY, String(Date.now()));
 }
 
 function clearRedirecting() {
@@ -142,6 +157,8 @@ async function setupLogin() {
   if (!loginButton) return;
 
   if (onLoginPage()) {
+    // 若因前一次導向中斷而殘留 guard，進入 login 頁時先清掉，避免卡住無法回到首頁
+    clearRedirecting();
     const redirected = await validateExistingTokenAndMaybeRedirect();
     if (redirected) return;
   }
