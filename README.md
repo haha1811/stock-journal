@@ -19,6 +19,7 @@
 
 - Google 帳號登入驗證，驗證成功後才可使用系統
 - 可用 email allowlist 或 Google Workspace 網域限制使用者
+- 多使用者資料隔離（依 Firebase UID），不同帳號資料互不干擾
 - 新增 / 編輯 / 刪除買賣交易
 - 多帳戶欄位與帳戶切換
 - 帳戶管理頁面

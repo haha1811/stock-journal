@@ -18,6 +18,16 @@ function isApiRequest(input) {
   }
 }
 
+function renderCurrentUser(user) {
+  const badge = document.querySelector("#current-user-badge");
+  if (!badge) return;
+
+  const email = (user && String(user.email || "").trim()) || "未知帳號";
+  const name = (user && String(user.name || "").trim()) || "";
+  badge.textContent = name ? `登入中：${name}（${email}）` : `登入中：${email}`;
+  badge.title = badge.textContent;
+}
+
 window.fetch = async (input, init = {}) => {
   if (!isApiRequest(input)) {
     return originalFetch(input, init);
@@ -59,6 +69,8 @@ async function verifyTokenOnPageLoad() {
     console.log("[Firebase Bridge] /api/auth/me status:", response.status);
 
     if (response.ok) {
+      const payload = await response.json().catch(() => ({}));
+      renderCurrentUser(payload?.user || null);
       if (loginPage) {
         console.log("[Firebase Bridge] token valid on login page, redirect to /");
         window.location.assign("/");

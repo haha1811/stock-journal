@@ -20,16 +20,21 @@
           把原本 Excel 的買入、賣出、手續費與交易稅，整理成比較順手的自用介面。
         </p>
       </div>
-      <div class="hero-actions">
-        <a class="secondary-button nav-link" href="/inventory.html">庫存頁</a>
-        <a class="secondary-button nav-link" href="/dividends.html">股利頁</a>
-        <a class="secondary-button nav-link" href="/dividend-stats.html">股利統計</a>
-        <a class="secondary-button nav-link" href="/dividend-calendar.html">股利月曆</a>
-        <button id="toggle-account-panel" class="secondary-button" type="button">帳戶管理</button>
-        <button id="export-button" class="secondary-button" type="button">匯出 JSON</button>
-        <label class="secondary-button upload-button" for="import-file">匯入 JSON</label>
-        <button id="logout-button" class="secondary-button logout-button" type="button">登出帳號</button>
-        <input id="import-file" type="file" accept="application/json">
+      <div class="hero-controls">
+        <div class="hero-actions">
+          <a class="secondary-button nav-link" href="/inventory.html">庫存頁</a>
+          <a class="secondary-button nav-link" href="/dividends.html">股利頁</a>
+          <a class="secondary-button nav-link" href="/dividend-stats.html">股利統計</a>
+          <a class="secondary-button nav-link" href="/dividend-calendar.html">股利月曆</a>
+          <button id="toggle-account-panel" class="secondary-button" type="button">帳戶管理</button>
+          <button id="export-button" class="secondary-button" type="button">匯出 JSON</button>
+          <label class="secondary-button upload-button" for="import-file">匯入 JSON</label>
+          <input id="import-file" type="file" accept="application/json">
+        </div>
+        <div class="hero-session-actions">
+          <span id="current-user-badge" class="current-user-badge" title="目前登入帳號">登入中：讀取中…</span>
+          <button id="logout-button" class="secondary-button logout-button" type="button">登出帳號</button>
+        </div>
       </div>
     </header>
 

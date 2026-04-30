@@ -290,6 +290,69 @@ class AuthTestCase(unittest.TestCase):
         payload = json.loads(response.read().decode("utf-8"))
         self.assertIn("items", payload)
 
+    def test_accounts_and_trades_are_isolated_by_firebase_uid(self):
+        claims = {
+            "token-a": {"uid": "uid-A", "email": "a@example.com", "email_verified": True, "name": "A", "picture": ""},
+            "token-b": {"uid": "uid-B", "email": "b@example.com", "email_verified": True, "name": "B", "picture": ""},
+        }
+        original_verify_firebase = server.verify_firebase_id_token
+        server.verify_firebase_id_token = lambda token: claims.get(token)
+        self.addCleanup(lambda: setattr(server, "verify_firebase_id_token", original_verify_firebase))
+
+        httpd = server.ThreadingHTTPServer(("127.0.0.1", 0), server.StockRequestHandler)
+        thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+        thread.start()
+        self.addCleanup(httpd.server_close)
+        self.addCleanup(thread.join, 2)
+        self.addCleanup(httpd.shutdown)
+        host, port = httpd.server_address
+
+        conn = http.client.HTTPConnection(host, port, timeout=5)
+        self.addCleanup(conn.close)
+
+        conn.request("GET", "/api/accounts", headers={"Authorization": "Bearer token-a"})
+        response = conn.getresponse()
+        self.assertEqual(response.status, 200)
+        default_accounts = json.loads(response.read().decode("utf-8"))["items"]
+        self.assertTrue(any(x["name"] == "主帳戶" for x in default_accounts))
+
+        conn.request("POST", "/api/accounts", body=json.dumps({"name": "A帳戶"}), headers={"Authorization": "Bearer token-a", "Content-Type": "application/json"})
+        response = conn.getresponse()
+        self.assertEqual(response.status, 201)
+        response.read()
+
+        trade = {
+            "settlement": "Y", "side": "買入", "date": "2026-04-30", "symbol": "0050", "name": "元大台灣50",
+            "quantity": 1, "price": 100, "fee": 0, "tax": 0, "note": "A only", "account": "A帳戶"
+        }
+        conn.request("POST", "/api/trades", body=json.dumps(trade), headers={"Authorization": "Bearer token-a", "Content-Type": "application/json"})
+        response = conn.getresponse()
+        self.assertEqual(response.status, 201)
+        response.read()
+
+        conn.request("GET", "/api/accounts", headers={"Authorization": "Bearer token-a"})
+        response = conn.getresponse()
+        self.assertEqual(response.status, 200)
+        a_accounts = json.loads(response.read().decode("utf-8"))["items"]
+        self.assertTrue(any(x["name"] == "A帳戶" for x in a_accounts))
+
+        conn.request("GET", "/api/accounts", headers={"Authorization": "Bearer token-b"})
+        response = conn.getresponse()
+        self.assertEqual(response.status, 200)
+        b_accounts = json.loads(response.read().decode("utf-8"))["items"]
+        self.assertTrue(any(x["name"] == "主帳戶" for x in b_accounts))
+        self.assertFalse(any(x["name"] == "A帳戶" for x in b_accounts))
+
+        conn.request("GET", "/api/trades", headers={"Authorization": "Bearer token-a"})
+        response = conn.getresponse()
+        self.assertEqual(response.status, 200)
+        self.assertEqual(len(json.loads(response.read().decode("utf-8"))["items"]), 1)
+
+        conn.request("GET", "/api/trades", headers={"Authorization": "Bearer token-b"})
+        response = conn.getresponse()
+        self.assertEqual(response.status, 200)
+        self.assertEqual(len(json.loads(response.read().decode("utf-8"))["items"]), 0)
+
 
 if __name__ == "__main__":
     unittest.main()

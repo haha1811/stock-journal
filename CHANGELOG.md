@@ -11,17 +11,36 @@
 ## [Unreleased]
 
 ### Added
-- SaaS 登入模式：新增「Log in with Google」登入按鈕與完整 Google OAuth 2.0 authorization code flow，包含 `/api/auth/google/start` 與 `/api/auth/google/callback`。
-- 新增後端 session cookie、登入使用者與 session 資料表，保護既有交易、庫存與股利頁面/API。
-- 新增 `STOCK_ALLOWED_GOOGLE_EMAILS` 與 `STOCK_ALLOWED_GOOGLE_DOMAIN` 限制可登入使用者。
-- 新增 auth 單元測試與 HTTP smoke 測試，涵蓋登入憑證驗證、session cookie 與未登入 API 阻擋。
+- 待補充
 
 ### Changed
-- README 補充 Google OAuth Client ID、正式部署 cookie 與 allowlist 設定說明。
-- systemd 範例補充 Google 登入所需環境變數。
+- 待補充
 
 ### Fixed
 - 待補充
+
+## [v0.3.0] - 2026-04-30
+
+### Added
+- Firebase Auth MVP：新增 Google 登入頁、前端 token bridge、後端 API 驗證守門與登出流程。
+- 新增多使用者隔離資料模型：`accounts`、`trades`、`holding_targets`、`dividend_manual_events`、`dividend_adjustments` 全面加入 `owner_uid`。
+- 新增協作權限資料表與 API：`user_permissions`、`POST /api/permissions`、`GET /api/permissions`。
+- 新增操作稽核與交易事件帳：`audit_logs`、`trade_events`，涵蓋交易/帳戶增修刪與匯入覆蓋等操作。
+- 新增高風險操作確認機制：刪除交易/帳戶需 `X-Confirm: YES`；`/api/trades/import` 覆蓋匯入需 `confirm=YES`。
+- 新增備份還原腳本：`scripts/backup_restore.sh`（backup/list/restore）。
+- 新增驗收操作手冊：`reports/操作測試手冊_明早執行.md`。
+- 新增隔離測試案例：`tests/test_auth.py` 驗證不同 Firebase UID 之資料互相隔離。
+
+### Changed
+- 前端頁首 UI 重構為 `hero-controls` / `hero-session-actions`，新增固定顯示的目前登入者 badge。
+- `auth.js` 改善 redirect guard 過期與殘留處理，降低登入導向循環。
+- 靜態資源回應加上 `Cache-Control: no-store` 等 header，避免舊 JS/CSS 快取造成登入異常。
+- Linux 啟動腳本 `run.sh` 改為優先使用專案 `.venv/bin/python` 啟動。
+- `accounts` 與多項資料表加入 migration 與唯一鍵重建邏輯，兼容既有資料升級。
+
+### Fixed
+- 修正未帶授權或 token 失效時前端導向行為，避免卡在非登入頁。
+- 修正刪除高風險動作缺乏二次確認的風險。
 
 ## [v0.2.0] - 2026-04-22
 

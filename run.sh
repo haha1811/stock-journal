@@ -7,4 +7,4 @@ cd "$SCRIPT_DIR"
 export STOCK_APP_HOST="${STOCK_APP_HOST:-0.0.0.0}"
 export STOCK_APP_PORT="${STOCK_APP_PORT:-8000}"
 
-python3 server.py
+exec "$SCRIPT_DIR/.venv/bin/python" server.py
