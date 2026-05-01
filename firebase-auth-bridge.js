@@ -1,5 +1,6 @@
 const FIREBASE_TOKEN_KEY = "stock_journal_firebase_id_token";
 const FIREBASE_REDIRECT_GUARD_KEY = "firebase_login_redirecting";
+const FIREBASE_USER_CACHE_KEY = "stock_journal_firebase_user";
 const originalFetch = window.fetch.bind(window);
 
 function isLoginPage() {
@@ -23,9 +24,28 @@ function renderCurrentUser(user) {
   if (!badge) return;
 
   const email = (user && String(user.email || "").trim()) || "未知帳號";
-  const name = (user && String(user.name || "").trim()) || "";
-  badge.textContent = name ? `登入中：${name}（${email}）` : `登入中：${email}`;
+  badge.textContent = `已登入：${email}`;
   badge.title = badge.textContent;
+}
+
+function getCachedUser() {
+  try {
+    const raw = localStorage.getItem(FIREBASE_USER_CACHE_KEY);
+    const parsed = raw ? JSON.parse(raw) : null;
+    return parsed && typeof parsed === "object" ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function saveCachedUser(user) {
+  const email = (user && String(user.email || "").trim()) || "";
+  if (!email) return;
+  localStorage.setItem(FIREBASE_USER_CACHE_KEY, JSON.stringify({ email }));
+}
+
+function clearCachedUser() {
+  localStorage.removeItem(FIREBASE_USER_CACHE_KEY);
 }
 
 window.fetch = async (input, init = {}) => {
@@ -50,6 +70,11 @@ window.fetch = async (input, init = {}) => {
 async function verifyTokenOnPageLoad() {
   const token = localStorage.getItem(FIREBASE_TOKEN_KEY);
   const loginPage = isLoginPage();
+  const cachedUser = getCachedUser();
+
+  if (token && cachedUser?.email) {
+    renderCurrentUser(cachedUser);
+  }
 
   console.log("[Firebase Bridge] page:", window.location.pathname, "hasToken:", Boolean(token));
 
@@ -70,7 +95,9 @@ async function verifyTokenOnPageLoad() {
 
     if (response.ok) {
       const payload = await response.json().catch(() => ({}));
-      renderCurrentUser(payload?.user || null);
+      const user = payload?.user || null;
+      renderCurrentUser(user);
+      saveCachedUser(user);
       if (loginPage) {
         console.log("[Firebase Bridge] token valid on login page, redirect to /");
         window.location.assign("/");
@@ -79,6 +106,7 @@ async function verifyTokenOnPageLoad() {
     }
 
     localStorage.removeItem(FIREBASE_TOKEN_KEY);
+    clearCachedUser();
     console.log("[Firebase Bridge] token invalid, cleared localStorage");
     if (!loginPage) {
       console.log("[Firebase Bridge] token invalid, redirect to /login.html");
@@ -87,6 +115,7 @@ async function verifyTokenOnPageLoad() {
   } catch (error) {
     console.error("[Firebase Bridge] token verify failed", error);
     localStorage.removeItem(FIREBASE_TOKEN_KEY);
+    clearCachedUser();
     if (!loginPage) {
       window.location.assign("/login.html");
     }
@@ -131,6 +160,7 @@ function initLogoutButton() {
       await originalFetch("/api/auth/logout", { method: "POST" }).catch(() => null);
     } finally {
       localStorage.removeItem(FIREBASE_TOKEN_KEY);
+      clearCachedUser();
       sessionStorage.removeItem(FIREBASE_REDIRECT_GUARD_KEY);
       window.location.assign("/login.html");
     }
