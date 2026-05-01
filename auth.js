@@ -2,7 +2,8 @@ import { initializeApp, getApps, getApp } from "https://www.gstatic.com/firebase
 import {
   getAuth,
   GoogleAuthProvider,
-  signInWithPopup,
+  signInWithRedirect,
+  getRedirectResult,
   onAuthStateChanged,
   setPersistence,
   browserLocalPersistence,
@@ -10,6 +11,40 @@ import {
 
 const FIREBASE_TOKEN_KEY = "stock_journal_firebase_id_token";
 const REDIRECTING_KEY = "firebase_login_redirecting";
+
+function showAuthStatus(message, tone = "info") {
+  let box = document.querySelector("#auth-status-box");
+  if (!box) {
+    box = document.createElement("div");
+    box.id = "auth-status-box";
+    box.style.marginTop = "12px";
+    box.style.padding = "12px";
+    box.style.borderRadius = "10px";
+    box.style.border = "1px solid #91caff";
+    box.style.background = "#e6f4ff";
+    box.style.color = "#0958d9";
+    box.style.fontSize = "14px";
+    box.style.lineHeight = "1.5";
+    const anchor = document.querySelector(".auth-card") || document.body;
+    anchor.appendChild(box);
+  }
+
+  if (tone === "success") {
+    box.style.border = "1px solid #95de64";
+    box.style.background = "#f6ffed";
+    box.style.color = "#237804";
+  } else if (tone === "error") {
+    box.style.border = "1px solid #ffa39e";
+    box.style.background = "#fff1f0";
+    box.style.color = "#cf1322";
+  } else {
+    box.style.border = "1px solid #91caff";
+    box.style.background = "#e6f4ff";
+    box.style.color = "#0958d9";
+  }
+
+  box.textContent = message;
+}
 
 function showAuthError(message) {
   let box = document.querySelector("#auth-error-box");
@@ -74,10 +109,12 @@ function redirectToApp(source) {
   if (!shouldRedirect) return false;
   if (blockedByGuard) {
     console.log(`[Firebase Login:${source}] redirect blocked by guard`);
+    showAuthStatus("redirect guard 阻擋導向，暫停跳轉。", "error");
     return false;
   }
 
   markRedirecting();
+  showAuthStatus("/api/auth/me 成功，進入系統...", "success");
   console.log(`[Firebase Login:${source}] redirecting to /`);
   window.location.assign("/");
   return true;
@@ -85,9 +122,16 @@ function redirectToApp(source) {
 
 async function storeToken(user, source) {
   if (!user) return false;
-  const idToken = await user.getIdToken();
-  localStorage.setItem(FIREBASE_TOKEN_KEY, idToken);
+  showAuthStatus("已取得 Firebase user...");
+  console.log(`[Firebase Login:${source}] user uid:`, user.uid || "(no uid)");
   console.log(`[Firebase Login:${source}] user email:`, user.email || "(no email)");
+
+  showAuthStatus("正在取得 ID token...");
+  const idToken = await user.getIdToken();
+
+  localStorage.setItem(FIREBASE_TOKEN_KEY, idToken);
+  showAuthStatus("token 已寫入 localStorage...");
+  console.log(`[Firebase Login:${source}] token key:`, FIREBASE_TOKEN_KEY);
   console.log(`[Firebase Login:${source}] idToken length:`, idToken ? idToken.length : 0);
   return Boolean(idToken);
 }
@@ -101,6 +145,7 @@ async function validateExistingTokenAndMaybeRedirect() {
   if (!token) return false;
 
   try {
+    showAuthStatus("正在呼叫 /api/auth/me...");
     const response = await fetch("/api/auth/me", {
       headers: { Authorization: `Bearer ${token}` },
     });
@@ -110,12 +155,24 @@ async function validateExistingTokenAndMaybeRedirect() {
       return redirectToApp("existing-token-valid");
     }
 
+    let payload = {};
+    try {
+      payload = await response.json();
+    } catch {
+      payload = {};
+    }
+
+    const code = payload?.error || "unknown_error";
+    const message = payload?.message || "";
+    showAuthStatus(`/api/auth/me 失敗：${response.status} / ${code} ${message}`.trim(), "error");
+
     localStorage.removeItem(FIREBASE_TOKEN_KEY);
     clearRedirecting();
     console.log("[Firebase Login:existing-token] token invalid, cleared token + redirecting flag");
     return false;
   } catch (error) {
     console.error("[Firebase Login:existing-token-check-error]", error);
+    showAuthStatus(`/api/auth/me 失敗：network / ${error?.message || String(error)}`, "error");
     if (!loginPage) {
       localStorage.removeItem(FIREBASE_TOKEN_KEY);
       clearRedirecting();
@@ -152,9 +209,47 @@ async function initAuth() {
   return auth;
 }
 
+async function verifyTokenWithBackend(source) {
+  const token = localStorage.getItem(FIREBASE_TOKEN_KEY);
+  if (!token) {
+    showAuthStatus("/api/auth/me 失敗：no token", "error");
+    return false;
+  }
+
+  showAuthStatus("正在呼叫 /api/auth/me...");
+  try {
+    const response = await fetch("/api/auth/me", {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+
+    let payload = {};
+    try {
+      payload = await response.json();
+    } catch {
+      payload = {};
+    }
+
+    console.log(`[Firebase Login:${source}] /api/auth/me status:`, response.status, payload);
+
+    if (response.ok) {
+      return true;
+    }
+
+    const code = payload?.error || "unknown_error";
+    const message = payload?.message || "";
+    showAuthStatus(`/api/auth/me 失敗：${response.status} / ${code} ${message}`.trim(), "error");
+    return false;
+  } catch (error) {
+    showAuthStatus(`/api/auth/me 失敗：network / ${error?.message || String(error)}`, "error");
+    return false;
+  }
+}
+
 async function setupLogin() {
   const loginButton = document.querySelector("#google-login-button");
   if (!loginButton) return;
+
+  showAuthStatus("正在準備 Google 登入...");
 
   if (onLoginPage()) {
     // 若因前一次導向中斷而殘留 guard，進入 login 頁時先清掉，避免卡住無法回到首頁
@@ -171,26 +266,70 @@ async function setupLogin() {
     const code = error?.code || "config_error";
     const message = error?.message || String(error);
     showAuthError(`初始化失敗：${code} - ${message}`);
+    showAuthStatus(`登入失敗：${code} / ${message}`, "error");
     return;
   }
+
+  try {
+    showAuthStatus("Google 回站，檢查 redirect result...");
+    const result = await getRedirectResult(auth);
+    console.log("[Firebase Login] getRedirectResult has result:", Boolean(result));
+    console.log("[Firebase Login] getRedirectResult has user:", Boolean(result?.user));
+
+    if (result?.user) {
+      const hasToken = await storeToken(result.user, "redirect-result");
+      if (hasToken) {
+        const backendOk = await verifyTokenWithBackend("redirect-result");
+        if (backendOk) {
+          showAuthStatus("登入成功，準備進入系統...", "success");
+          redirectToApp("redirect-result");
+          return;
+        }
+      }
+    }
+
+    showAuthStatus("redirect result 為空，改用 auth state 檢查...");
+  } catch (error) {
+    console.error("[Firebase Redirect Result Error]", error);
+    const code = error?.code || "unknown_error";
+    const message = error?.message || String(error);
+    showAuthError(`登入錯誤：${code} - ${message}`);
+    showAuthStatus(`登入失敗：${code} / ${message}`, "error");
+  }
+
+  showAuthStatus("Firebase 初始化完成");
 
   onAuthStateChanged(auth, async (user) => {
     console.log("[Firebase Login] onAuthStateChanged has user:", Boolean(user));
     if (!user) return;
+    console.log("[Firebase Login] auth state user email:", user.email || "(no email)");
+    console.log("[Firebase Login] auth state user uid:", user.uid || "(no uid)");
+
     try {
       const hasToken = await storeToken(user, "auth-state");
       if (hasToken) {
-        redirectToApp("auth-state");
+        const backendOk = await verifyTokenWithBackend("auth-state");
+        if (backendOk) {
+          showAuthStatus("登入成功，準備進入系統...", "success");
+          redirectToApp("auth-state");
+        }
       }
     } catch (error) {
       console.error("[Firebase Auth State Error]", error);
+      const code = error?.code || "unknown_error";
+      const message = error?.message || String(error);
+      showAuthStatus(`登入失敗：${code} / ${message}`, "error");
     }
   });
+
+  const provider = new GoogleAuthProvider();
+  console.log("[Firebase Login] provider initialized:", provider?.providerId || "(no providerId)");
 
   loginButton.addEventListener("click", async (event) => {
     event.preventDefault();
     event.stopPropagation();
     clearAuthError();
+    showAuthStatus("正在跳轉 Google 登入...");
 
     loginButton.setAttribute("aria-busy", "true");
     loginButton.classList.add("is-loading");
@@ -200,23 +339,18 @@ async function setupLogin() {
       await setPersistence(auth, browserLocalPersistence);
       console.log("[Firebase Login] persistence set");
 
-      const provider = new GoogleAuthProvider();
       clearRedirecting();
-      console.log("[Firebase Login] signInWithPopup called");
-      const result = await signInWithPopup(auth, provider);
-      console.log("[Firebase Login] signInWithPopup resolved");
-
-      const hasToken = await storeToken(result.user, "popup");
-      if (hasToken) {
-        redirectToApp("popup");
-      }
+      console.log("before redirect", auth, provider);
+      console.log("calling redirect");
+      await signInWithRedirect(auth, provider);
+      console.log("redirect called");
     } catch (error) {
-      console.error("[Firebase Login Popup Error]", error);
+      console.error("[Firebase Login Redirect Error]", error);
       const code = error?.code || "unknown_error";
       const message = error?.message || String(error);
       alert(`Google 登入失敗\ncode: ${code}\nmessage: ${message}`);
       showAuthError(`登入失敗：${code} - ${message}`);
-    } finally {
+      showAuthStatus(`登入失敗：${code} / ${message}`, "error");
       loginButton.removeAttribute("aria-busy");
       loginButton.classList.remove("is-loading");
     }
