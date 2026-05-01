@@ -143,24 +143,24 @@
 
   <template id="dividend-row-template">
     <tr>
-      <td data-key="account"></td>
-      <td data-key="ex_dividend_date"></td>
-      <td data-key="payment_date"></td>
-      <td data-key="year"></td>
-      <td data-key="month"></td>
-      <td data-key="symbol"></td>
-      <td data-key="name"></td>
-      <td data-key="eligible_units"></td>
-      <td data-key="avg_price"></td>
-      <td data-key="cash_dividend_per_unit"></td>
-      <td data-key="yield_rate"></td>
-      <td data-key="gross_amount"></td>
-      <td>
+      <td data-key="account" data-label="帳戶"></td>
+      <td data-key="ex_dividend_date" data-label="除息日"></td>
+      <td data-key="payment_date" data-label="發放日"></td>
+      <td data-key="year" data-label="年"></td>
+      <td data-key="month" data-label="月"></td>
+      <td data-key="symbol" data-label="股號"></td>
+      <td data-key="name" data-label="股名"></td>
+      <td data-key="eligible_units" data-label="單位數"></td>
+      <td data-key="avg_price" data-label="股價"></td>
+      <td data-key="cash_dividend_per_unit" data-label="金額(股)"></td>
+      <td data-key="yield_rate" data-label="殖利率"></td>
+      <td data-key="gross_amount" data-label="金額(合計)"></td>
+      <td data-label="跨行扣款">
         <input class="bank-fee-input" type="number" min="0" step="1" placeholder="扣款">
       </td>
-      <td data-key="net_amount"></td>
-      <td data-key="source"></td>
-      <td>
+      <td data-key="net_amount" data-label="實領"></td>
+      <td data-key="source" data-label="來源"></td>
+      <td data-label="操作">
         <button class="dividend-save fancy-save-button" type="button"><span>儲存</span></button>
         <button class="dividend-edit row-edit" type="button" hidden>編輯</button>
         <button class="dividend-delete row-delete" type="button" hidden>刪除</button>

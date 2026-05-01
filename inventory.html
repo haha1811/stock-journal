@@ -124,23 +124,23 @@
 
   <template id="inventory-row-template">
     <tr>
-      <td data-key="account"></td>
-      <td data-key="symbol"></td>
-      <td data-key="name"></td>
-      <td data-key="quantity"></td>
-      <td data-key="avg_price"></td>
-      <td data-key="inventory_cost"></td>
-      <td data-key="latest_price"></td>
-      <td data-key="market_value"></td>
-      <td data-key="unrealized_profit"></td>
-      <td data-key="unrealized_profit_pct"></td>
-      <td>
+      <td data-key="account" data-label="帳戶"></td>
+      <td data-key="symbol" data-label="股號"></td>
+      <td data-key="name" data-label="股名"></td>
+      <td data-key="quantity" data-label="庫存數量(股)"></td>
+      <td data-key="avg_price" data-label="平均價(股)"></td>
+      <td data-key="inventory_cost" data-label="庫存成本"></td>
+      <td data-key="latest_price" data-label="最新更新價"></td>
+      <td data-key="market_value" data-label="市值"></td>
+      <td data-key="unrealized_profit" data-label="未實現損益"></td>
+      <td data-key="unrealized_profit_pct" data-label="未實現報酬"></td>
+      <td data-label="可賣價">
         <input class="target-input" type="number" min="0" step="0.01" placeholder="可賣價">
       </td>
-      <td>
+      <td data-label="備註">
         <input class="note-input" type="text" maxlength="80" placeholder="備註">
       </td>
-      <td>
+      <td data-label="操作">
         <button class="inventory-save fancy-save-button" type="button">
           <span>儲存</span>
         </button>

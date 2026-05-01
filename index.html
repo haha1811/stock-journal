@@ -243,21 +243,21 @@
 
   <template id="table-row-template">
     <tr>
-      <td data-key="index"></td>
-      <td data-key="settlement"></td>
-      <td data-key="side"></td>
-      <td data-key="date"></td>
-      <td data-key="year"></td>
-      <td data-key="account"></td>
-      <td data-key="symbol"></td>
-      <td data-key="name"></td>
-      <td data-key="quantity"></td>
-      <td data-key="price"></td>
-      <td data-key="amount"></td>
-      <td data-key="fee"></td>
-      <td data-key="tax"></td>
-      <td data-key="note"></td>
-      <td>
+      <td data-key="index" data-label="No"></td>
+      <td data-key="settlement" data-label="T+2"></td>
+      <td data-key="side" data-label="買賣"></td>
+      <td data-key="date" data-label="日期"></td>
+      <td data-key="year" data-label="年"></td>
+      <td data-key="account" data-label="帳戶"></td>
+      <td data-key="symbol" data-label="股號"></td>
+      <td data-key="name" data-label="股名"></td>
+      <td data-key="quantity" data-label="數量(股)"></td>
+      <td data-key="price" data-label="價格(股)"></td>
+      <td data-key="amount" data-label="費用"></td>
+      <td data-key="fee" data-label="手續費"></td>
+      <td data-key="tax" data-label="交易稅"></td>
+      <td data-key="note" data-label="備註"></td>
+      <td data-label="操作">
         <button class="row-edit" type="button">編輯</button>
         <button class="row-delete" type="button">刪除</button>
       </td>
@@ -266,8 +266,8 @@
 
   <template id="account-row-template">
     <tr>
-      <td data-key="name"></td>
-      <td>
+      <td data-key="name" data-label="帳戶名稱"></td>
+      <td data-label="操作">
         <button class="account-edit" type="button">編輯</button>
         <button class="account-delete" type="button">刪除</button>
       </td>
