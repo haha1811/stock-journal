@@ -2,6 +2,7 @@ import { initializeApp, getApps, getApp } from "https://www.gstatic.com/firebase
 import {
   getAuth,
   GoogleAuthProvider,
+  signInWithPopup,
   signInWithRedirect,
   getRedirectResult,
   onAuthStateChanged,
@@ -11,8 +12,14 @@ import {
 
 const FIREBASE_TOKEN_KEY = "stock_journal_firebase_id_token";
 const REDIRECTING_KEY = "firebase_login_redirecting";
+const SHOW_LOGIN_STATUS_MESSAGE = false;
 
 function showAuthStatus(message, tone = "info") {
+  if (!SHOW_LOGIN_STATUS_MESSAGE) {
+    console.log(`[AuthStatus:${tone}] ${message}`);
+    return;
+  }
+
   let box = document.querySelector("#auth-status-box");
   if (!box) {
     box = document.createElement("div");
@@ -67,6 +74,11 @@ function showAuthError(message) {
 
 function clearAuthError() {
   const box = document.querySelector("#auth-error-box");
+  if (box) box.remove();
+}
+
+function clearAuthStatus() {
+  const box = document.querySelector("#auth-status-box");
   if (box) box.remove();
 }
 
@@ -212,7 +224,7 @@ async function initAuth() {
 async function verifyTokenWithBackend(source) {
   const token = localStorage.getItem(FIREBASE_TOKEN_KEY);
   if (!token) {
-    showAuthStatus("/api/auth/me 失敗：no token", "error");
+    showAuthStatus("尚未取得登入 token，請先完成 Google 登入。", "info");
     return false;
   }
 
@@ -297,7 +309,8 @@ async function setupLogin() {
     showAuthStatus(`登入失敗：${code} / ${message}`, "error");
   }
 
-  showAuthStatus("Firebase 初始化完成");
+  // 初始化完成後維持乾淨的登入畫面，只在操作中或錯誤時顯示狀態訊息。
+  clearAuthStatus();
 
   onAuthStateChanged(auth, async (user) => {
     console.log("[Firebase Login] onAuthStateChanged has user:", Boolean(user));
@@ -329,7 +342,7 @@ async function setupLogin() {
     event.preventDefault();
     event.stopPropagation();
     clearAuthError();
-    showAuthStatus("正在跳轉 Google 登入...");
+    showAuthStatus("正在啟動 Google 登入...");
 
     loginButton.setAttribute("aria-busy", "true");
     loginButton.classList.add("is-loading");
@@ -340,15 +353,43 @@ async function setupLogin() {
       console.log("[Firebase Login] persistence set");
 
       clearRedirecting();
-      console.log("before redirect", auth, provider);
-      console.log("calling redirect");
+      try {
+        showAuthStatus("嘗試使用 Popup 登入...");
+        const popupResult = await signInWithPopup(auth, provider);
+        if (popupResult?.user) {
+          const hasToken = await storeToken(popupResult.user, "popup-result");
+          if (hasToken) {
+            const backendOk = await verifyTokenWithBackend("popup-result");
+            if (backendOk) {
+              showAuthStatus("登入成功，準備進入系統...", "success");
+              redirectToApp("popup-result");
+              return;
+            }
+          }
+        }
+      } catch (popupError) {
+        const popupCode = popupError?.code || "";
+        const canFallbackToRedirect = popupCode === "auth/popup-blocked" ||
+          popupCode === "auth/popup-closed-by-user" ||
+          popupCode === "auth/cancelled-popup-request" ||
+          popupCode === "auth/web-storage-unsupported";
+
+        if (!canFallbackToRedirect) {
+          throw popupError;
+        }
+
+        console.warn("[Firebase Login Popup Fallback]", popupError);
+        showAuthStatus("Popup 無法使用，改用 Redirect 登入...");
+        await signInWithRedirect(auth, provider);
+        return;
+      }
+
+      showAuthStatus("Popup 登入未取得使用者資訊，改用 Redirect 登入...");
       await signInWithRedirect(auth, provider);
-      console.log("redirect called");
     } catch (error) {
       console.error("[Firebase Login Redirect Error]", error);
       const code = error?.code || "unknown_error";
       const message = error?.message || String(error);
-      alert(`Google 登入失敗\ncode: ${code}\nmessage: ${message}`);
       showAuthError(`登入失敗：${code} - ${message}`);
       showAuthStatus(`登入失敗：${code} / ${message}`, "error");
       loginButton.removeAttribute("aria-busy");
