@@ -1146,6 +1146,10 @@ def update_account(account_id, payload, owner_uid):
         ).fetchone()
         if not existing:
             raise LookupError("找不到要更新的帳戶")
+        if existing["name"] == "主帳戶":
+            raise ValueError("主帳戶名稱不可編輯")
+        if new_name == "主帳戶":
+            raise ValueError("主帳戶為保留名稱，不可用於其他帳戶")
 
         duplicate = connection.execute(
             "SELECT id FROM accounts WHERE owner_uid = ? AND name = ? AND id <> ?",

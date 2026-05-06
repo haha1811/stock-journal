@@ -394,6 +394,15 @@ select:focus {
   color: var(--primary-strong);
 }
 
+.account-edit.is-disabled,
+.account-delete.is-disabled,
+.account-edit:disabled,
+.account-delete:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  transform: none;
+}
+
 #import-file {
   display: none;
 }

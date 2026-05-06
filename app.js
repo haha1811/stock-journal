@@ -494,9 +494,16 @@ function renderAccountTable() {
   state.accounts.forEach((account) => {
     const fragment = accountRowTemplate.content.cloneNode(true);
     const row = fragment.querySelector("tr");
+    const editButton = row.querySelector(".account-edit");
+    const deleteButton = row.querySelector(".account-delete");
+    const isDefaultAccount = account.name === "主帳戶";
     row.querySelector('[data-key="name"]').textContent = account.name;
 
-    row.querySelector(".account-edit").addEventListener("click", () => {
+    editButton.addEventListener("click", () => {
+      if (isDefaultAccount) {
+        alert("主帳戶名稱不可編輯");
+        return;
+      }
       state.editingAccountId = account.id;
       accountFormLabel.textContent = "編輯帳戶";
       accountSubmitButton.textContent = "更新帳戶";
@@ -506,7 +513,11 @@ function renderAccountTable() {
       accountNameInput.focus();
     });
 
-    row.querySelector(".account-delete").addEventListener("click", async () => {
+    deleteButton.addEventListener("click", async () => {
+      if (isDefaultAccount) {
+        alert("主帳戶不可刪除");
+        return;
+      }
       if (!window.confirm(`確定要刪除帳戶「${account.name}」嗎？`)) {
         return;
       }
@@ -524,6 +535,15 @@ function renderAccountTable() {
         alert(error.message);
       }
     });
+
+    if (isDefaultAccount) {
+      editButton.disabled = true;
+      deleteButton.disabled = true;
+      editButton.classList.add("is-disabled");
+      deleteButton.classList.add("is-disabled");
+      editButton.title = "主帳戶名稱不可編輯";
+      deleteButton.title = "主帳戶不可刪除";
+    }
 
     accountTableBody.append(fragment);
   });
