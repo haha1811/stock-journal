@@ -8,6 +8,7 @@ __pycache__/
 *.db-journal
 data/
 node_modules/
+.venv/
 .env
 !.env.example
 backups/

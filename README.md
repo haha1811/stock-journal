@@ -130,6 +130,8 @@ chmod +x run.sh
 ./run.sh
 ```
 
+`run.sh` 會優先使用專案內的 `.venv/bin/python`；若 `.venv` 尚未建立，會自動 fallback 到系統 `python3`。
+
 3. 開啟瀏覽器進入：
 
 ```text
@@ -140,6 +142,30 @@ http://127.0.0.1:8000
 
 ```bash
 STOCK_APP_HOST=0.0.0.0 STOCK_APP_PORT=8000 python3 server.py
+```
+
+### Pi5 建議流程（正式環境）
+
+1. 建立並啟用虛擬環境：
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+```
+
+2. 安裝必要套件（目前至少需要 Firebase Admin）：
+
+```bash
+python -m pip install --upgrade pip
+python -m pip install firebase-admin
+```
+
+3. 確認 `.env` 內 `FIREBASE_SERVICE_ACCOUNT_JSON` 為 Pi5 可讀取的 Linux 路徑（例如 `/home/pi/stock-journal/keys/service-account.json`）。
+
+4. 啟動服務：
+
+```bash
+./run.sh
 ```
 
 ## 環境變數
