@@ -1,6 +1,7 @@
 import http.client
 import json
 import os
+import ssl
 import tempfile
 import threading
 import unittest
@@ -464,6 +465,14 @@ class AuthTestCase(unittest.TestCase):
             ).fetchone()
         self.assertEqual(row["source"], "TWSE ETF dividend list")
         self.assertTrue(row["updated_at"])
+
+    def test_twse_ssl_context_keeps_verification_without_python_313_strict_mode(self):
+        context = server.create_twse_ssl_context()
+
+        self.assertEqual(context.verify_mode, ssl.CERT_REQUIRED)
+        self.assertTrue(context.check_hostname)
+        if hasattr(ssl, "VERIFY_X509_STRICT"):
+            self.assertFalse(context.verify_flags & ssl.VERIFY_X509_STRICT)
 
 
 if __name__ == "__main__":
