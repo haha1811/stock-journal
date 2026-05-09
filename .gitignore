@@ -17,3 +17,4 @@ firebase-auth-debug.log
 .DS_Store
 Thumbs.db
 release-v*.md
+logs/
