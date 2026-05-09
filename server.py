@@ -4,6 +4,7 @@ import mimetypes
 import os
 import secrets
 import sqlite3
+import ssl
 import threading
 import traceback
 import urllib.error
@@ -592,6 +593,13 @@ def get_oauth_state_from_cookie(cookie_header):
 
 def strip_prefix(value, prefix):
     return value[len(prefix):] if value.startswith(prefix) else value
+
+
+def create_twse_ssl_context():
+    context = ssl.create_default_context()
+    if hasattr(ssl, "VERIFY_X509_STRICT"):
+        context.verify_flags &= ~ssl.VERIFY_X509_STRICT
+    return context
 
 
 def require_user_uid(user):
@@ -1639,7 +1647,7 @@ def fetch_twse_dividend_list():
             },
         )
         try:
-            with urllib.request.urlopen(request, timeout=20) as response:
+            with urllib.request.urlopen(request, timeout=20, context=create_twse_ssl_context()) as response:
                 html = response.read().decode("utf-8", errors="ignore")
                 break
         except urllib.error.URLError as error:
@@ -2252,7 +2260,7 @@ def fetch_twse_daily_prices(query_date):
             "Accept": "application/json,text/plain,*/*",
         },
     )
-    with urllib.request.urlopen(request, timeout=20) as response:
+    with urllib.request.urlopen(request, timeout=20, context=create_twse_ssl_context()) as response:
         payload = json.loads(response.read().decode("utf-8"))
     return extract_price_rows(payload)
 
