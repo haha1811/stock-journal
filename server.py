@@ -892,6 +892,19 @@ def ensure_database():
         if "owner_uid" not in adjust_columns:
             connection.execute("ALTER TABLE dividend_adjustments ADD COLUMN owner_uid TEXT NOT NULL DEFAULT '__legacy__'")
 
+        dividend_event_columns = {
+            row["name"]
+            for row in connection.execute("PRAGMA table_info(dividend_events)").fetchall()
+        }
+        if "source" not in dividend_event_columns:
+            connection.execute(
+                "ALTER TABLE dividend_events ADD COLUMN source TEXT NOT NULL DEFAULT 'TWSE ETF dividend list'"
+            )
+        if "updated_at" not in dividend_event_columns:
+            connection.execute(
+                "ALTER TABLE dividend_events ADD COLUMN updated_at TEXT NOT NULL DEFAULT ''"
+            )
+
         connection.execute(
             """
             DELETE FROM holding_targets
@@ -2244,8 +2257,34 @@ def fetch_twse_daily_prices(query_date):
     return extract_price_rows(payload)
 
 
+def list_inventory_symbols_for_quote_refresh():
+    with get_connection() as connection:
+        rows = connection.execute(
+            """
+            SELECT symbol
+            FROM (
+                SELECT
+                    owner_uid,
+                    account,
+                    symbol,
+                    SUM(
+                        CASE
+                            WHEN side = '買入' THEN quantity
+                            WHEN side = '賣出' THEN -quantity
+                            ELSE 0
+                        END
+                    ) AS net_quantity
+                FROM trades
+                GROUP BY owner_uid, account, symbol
+            )
+            WHERE net_quantity > 0
+            """
+        ).fetchall()
+    return {row["symbol"] for row in rows if row["symbol"]}
+
+
 def refresh_quotes(force=False):
-    inventory_symbols = {item["symbol"] for item in compute_inventory_items()}
+    inventory_symbols = list_inventory_symbols_for_quote_refresh()
     if not inventory_symbols:
         return {"updated_count": 0, "quoted_date": None}
 
