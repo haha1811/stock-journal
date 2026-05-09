@@ -353,6 +353,118 @@ class AuthTestCase(unittest.TestCase):
         self.assertEqual(response.status, 200)
         self.assertEqual(len(json.loads(response.read().decode("utf-8"))["items"]), 0)
 
+    def test_refresh_quotes_updates_symbols_across_all_user_inventories(self):
+        now = server.current_iso_now()
+        with server.get_connection() as connection:
+            connection.executemany(
+                """
+                INSERT INTO trades (
+                    id, owner_uid, account, settlement, side, date, year, symbol, name,
+                    quantity, price, amount, fee, tax, note, created_at, updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                [
+                    (
+                        "trade-uid-a-0050",
+                        "uid-A",
+                        "主帳戶",
+                        "Y",
+                        "買入",
+                        "2026-04-30",
+                        "2026",
+                        "0050",
+                        "ETF 50",
+                        10,
+                        100,
+                        1000,
+                        0,
+                        0,
+                        "",
+                        now,
+                        now,
+                    ),
+                    (
+                        "trade-uid-b-2330",
+                        "uid-B",
+                        "主帳戶",
+                        "Y",
+                        "買入",
+                        "2026-04-30",
+                        "2026",
+                        "2330",
+                        "TSMC",
+                        2,
+                        800,
+                        1600,
+                        0,
+                        0,
+                        "",
+                        now,
+                        now,
+                    ),
+                ],
+            )
+            connection.commit()
+
+        original_fetch = server.fetch_twse_daily_prices
+        server.fetch_twse_daily_prices = lambda _query_date: {
+            "0050": {"symbol": "0050", "name": "ETF 50", "price": 120.5},
+            "2330": {"symbol": "2330", "name": "TSMC", "price": 900.0},
+        }
+        self.addCleanup(lambda: setattr(server, "fetch_twse_daily_prices", original_fetch))
+
+        result = server.refresh_quotes(force=True)
+
+        self.assertEqual(result["updated_count"], 2)
+        uid_a_inventory = server.list_inventory("ALL", "uid-A")["items"]
+        uid_b_inventory = server.list_inventory("ALL", "uid-B")["items"]
+        self.assertEqual(uid_a_inventory[0]["latest_price"], 120.5)
+        self.assertEqual(uid_b_inventory[0]["latest_price"], 900.0)
+
+    def test_refresh_dividends_migrates_legacy_dividend_events_without_source(self):
+        server.DB_PATH = Path(self.temp_dir.name) / "legacy-dividend-events.sqlite3"
+        server.DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+        with server.sqlite3.connect(server.DB_PATH) as connection:
+            connection.execute(
+                """
+                CREATE TABLE dividend_events (
+                    symbol TEXT NOT NULL,
+                    name TEXT NOT NULL,
+                    ex_dividend_date TEXT NOT NULL,
+                    payment_date TEXT NOT NULL,
+                    cash_dividend_per_unit REAL NOT NULL,
+                    PRIMARY KEY (symbol, ex_dividend_date, payment_date)
+                )
+                """
+            )
+            connection.commit()
+
+        server.ensure_database()
+
+        original_fetch = server.fetch_twse_dividend_list
+        server.fetch_twse_dividend_list = lambda: [
+            {
+                "symbol": "0050",
+                "name": "ETF 50",
+                "ex_dividend_date": "2026-07-21",
+                "payment_date": "2026-08-15",
+                "cash_dividend_per_unit": 1.25,
+                "source": "TWSE ETF dividend list",
+            }
+        ]
+        self.addCleanup(lambda: setattr(server, "fetch_twse_dividend_list", original_fetch))
+
+        result = server.refresh_dividend_events(force=True)
+
+        self.assertEqual(result["updated_count"], 1)
+        with server.get_connection() as connection:
+            row = connection.execute(
+                "SELECT source, updated_at FROM dividend_events WHERE symbol = '0050'"
+            ).fetchone()
+        self.assertEqual(row["source"], "TWSE ETF dividend list")
+        self.assertTrue(row["updated_at"])
+
 
 if __name__ == "__main__":
     unittest.main()
