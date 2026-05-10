@@ -41,6 +41,7 @@ PRICE_REFRESH_HOUR = 15
 DIVIDEND_REFRESH_HOUR = 6
 SESSION_COOKIE_NAME = "stock_journal_session"
 SESSION_DAYS = 14
+FIREBASE_AUTH_HELPER_PREFIX = "/__/auth/"
 PUBLIC_PATHS = {
     "/api/health",
     "/api/auth/config",
@@ -150,6 +151,17 @@ def get_firebase_messaging_sender_id():
 
 def get_firebase_service_account_path():
     return os.getenv("FIREBASE_SERVICE_ACCOUNT_JSON", "").strip()
+
+
+def get_firebase_auth_helper_proxy_origin():
+    configured = os.getenv("FIREBASE_AUTH_HELPER_PROXY_ORIGIN", "").strip().rstrip("/")
+    if configured:
+        return configured
+
+    project_id = get_firebase_project_id()
+    if not project_id:
+        return ""
+    return f"https://{project_id}.firebaseapp.com"
 
 
 def google_oauth_env_error():
@@ -441,6 +453,66 @@ def get_public_auth_config():
             "messagingSenderId": get_firebase_messaging_sender_id(),
         },
     }
+
+
+def is_firebase_auth_helper_path(path):
+    return path.startswith(FIREBASE_AUTH_HELPER_PREFIX)
+
+
+def proxy_firebase_auth_helper(handler, parsed):
+    origin = get_firebase_auth_helper_proxy_origin()
+    if not origin:
+        handler.send_json(
+            {"error": "firebase_auth_helper_proxy_not_configured"},
+            status=HTTPStatus.SERVICE_UNAVAILABLE,
+        )
+        return
+
+    target_url = origin + parsed.path
+    if parsed.query:
+        target_url += "?" + parsed.query
+
+    body = None
+    headers = {"User-Agent": "stock-journal-firebase-auth-proxy"}
+    if handler.command in {"POST", "PUT", "PATCH"}:
+        content_length = int(handler.headers.get("Content-Length", "0"))
+        body = handler.rfile.read(content_length) if content_length else b""
+        content_type = handler.headers.get("Content-Type")
+        if content_type:
+            headers["Content-Type"] = content_type
+
+    request = urllib.request.Request(target_url, data=body, headers=headers, method=handler.command)
+
+    try:
+        response = urllib.request.urlopen(request, timeout=20)
+    except urllib.error.HTTPError as error:
+        response = error
+    except urllib.error.URLError:
+        handler.send_json({"error": "firebase_auth_helper_proxy_failed"}, status=HTTPStatus.BAD_GATEWAY)
+        return
+
+    with response:
+        content = response.read()
+        status = getattr(response, "status", None) or getattr(response, "code", HTTPStatus.BAD_GATEWAY)
+        handler.send_response(status)
+        skip_headers = {
+            "connection",
+            "content-encoding",
+            "content-length",
+            "keep-alive",
+            "proxy-authenticate",
+            "proxy-authorization",
+            "te",
+            "trailer",
+            "transfer-encoding",
+            "upgrade",
+        }
+        for name, value in response.headers.items():
+            if name.lower() not in skip_headers:
+                handler.send_header(name, value)
+        handler.send_header("Content-Length", str(len(content)))
+        handler.end_headers()
+        handler.wfile.write(content)
 
 
 def get_bearer_token_from_auth_header(auth_header):
@@ -2399,6 +2471,10 @@ class StockRequestHandler(BaseHTTPRequestHandler):
             parsed = urlparse(self.path)
             query = parse_qs(parsed.query)
 
+            if is_firebase_auth_helper_path(parsed.path):
+                proxy_firebase_auth_helper(self, parsed)
+                return
+
             if parsed.path == "/api/health":
                 self.send_json({"status": "ok"})
                 return
@@ -2469,6 +2545,10 @@ class StockRequestHandler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
 
         try:
+            if is_firebase_auth_helper_path(parsed.path):
+                proxy_firebase_auth_helper(self, parsed)
+                return
+
             payload = self.read_json_body()
 
             if parsed.path == "/api/auth/google":

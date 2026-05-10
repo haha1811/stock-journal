@@ -211,6 +211,9 @@ python -m pip install firebase-admin
 - `STOCK_ALLOWED_GOOGLE_EMAILS`：逗號分隔 email allowlist，例如 `user1@gmail.com,user2@gmail.com`。
 - `STOCK_ALLOWED_GOOGLE_DOMAIN`：限制 Google Workspace 網域，例如 `example.com`。
 - `STOCK_COOKIE_SECURE`：正式 HTTPS 部署建議設為 `true`，讓 session cookie 加上 `Secure`。
+- `FIREBASE_AUTH_HELPER_PROXY_ORIGIN`：當 `FIREBASE_AUTH_DOMAIN` 設為正式自訂網域時，`/__/auth/*` 反向代理的 Firebase helper 來源；預設為 `https://<FIREBASE_PROJECT_ID>.firebaseapp.com`。
+
+手機瀏覽器若使用 `signInWithRedirect()`，自架網域需避免 Firebase helper 跨來源儲存限制。正式 HTTPS 部署建議將 `FIREBASE_AUTH_DOMAIN` 設為實際服務網域（例如 `haha-pi.myhaha.idv.tw`），並讓本服務代理 `https://<app-domain>/__/auth/*` 到 Firebase helper。若使用 Google provider，Google Cloud OAuth redirect URI 也需允許 `https://<app-domain>/__/auth/handler`。
 
 ## Firebase Auth 設定與測試（Phase A MVP）
 
