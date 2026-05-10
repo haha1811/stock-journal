@@ -12,8 +12,8 @@
 
 - Python：建議 `3.11+`
 - 作業系統：`Windows`、`Linux`
-- 主要依賴：Python 標準函式庫（目前不需額外安裝第三方套件）
-- Google OAuth：SaaS 登入版需要設定 `GOOGLE_CLIENT_ID`、`GOOGLE_CLIENT_SECRET`、`REDIRECT_URI`
+- 主要依賴：`firebase-admin`（後端驗證 Firebase ID Token）
+- 登入：主流程使用 Firebase Auth（Google Sign-In）；舊 Google OAuth callback/session routes 僅保留相容用途
 
 ## 目前功能
 
@@ -214,6 +214,14 @@ python -m pip install firebase-admin
 - `FIREBASE_AUTH_HELPER_PROXY_ORIGIN`：當 `FIREBASE_AUTH_DOMAIN` 設為正式自訂網域時，`/__/auth/*` 反向代理的 Firebase helper 來源；預設為 `https://<FIREBASE_PROJECT_ID>.firebaseapp.com`。
 
 手機瀏覽器若使用 `signInWithRedirect()`，自架網域需避免 Firebase helper 跨來源儲存限制。正式 HTTPS 部署建議將 `FIREBASE_AUTH_DOMAIN` 設為實際服務網域（例如 `haha-pi.myhaha.idv.tw`），並讓本服務代理 `https://<app-domain>/__/auth/*` 到 Firebase helper。若使用 Google provider，Google Cloud OAuth redirect URI 也需允許 `https://<app-domain>/__/auth/handler`。
+
+若前面使用 Caddy / nginx 等反向代理，`/__/auth/*` 必須先轉發到本服務，不能落到前端 fallback。Caddy 範例：
+
+```caddy
+handle /__/auth/* {
+    reverse_proxy 127.0.0.1:8000
+}
+```
 
 ## Firebase Auth 設定與測試（Phase A MVP）
 
