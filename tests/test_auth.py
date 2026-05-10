@@ -184,6 +184,63 @@ class AuthTestCase(unittest.TestCase):
         payload = json.loads(response.read().decode("utf-8"))
         self.assertEqual(payload["user"]["email"], "web-user@example.com")
 
+    def test_firebase_auth_helper_requests_are_proxied_before_app_routes(self):
+        calls = []
+        sentinel = object()
+        original_proxy = getattr(server, "proxy_firebase_auth_helper", sentinel)
+
+        def fake_proxy(handler, parsed):
+            calls.append((handler.command, parsed.path, parsed.query))
+            handler.send_response(200)
+            handler.send_header("Content-Type", "text/plain")
+            handler.send_header("Content-Length", str(len("firebase-helper")))
+            handler.end_headers()
+            handler.wfile.write(b"firebase-helper")
+
+        server.proxy_firebase_auth_helper = fake_proxy
+
+        def restore_proxy():
+            if original_proxy is sentinel:
+                delattr(server, "proxy_firebase_auth_helper")
+            else:
+                server.proxy_firebase_auth_helper = original_proxy
+
+        self.addCleanup(restore_proxy)
+
+        httpd = server.ThreadingHTTPServer(("127.0.0.1", 0), server.StockRequestHandler)
+        thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+        thread.start()
+        self.addCleanup(httpd.server_close)
+        self.addCleanup(thread.join, 2)
+        self.addCleanup(httpd.shutdown)
+        host, port = httpd.server_address
+
+        conn = http.client.HTTPConnection(host, port, timeout=5)
+        self.addCleanup(conn.close)
+
+        conn.request("GET", "/__/auth/handler?apiKey=test")
+        response = conn.getresponse()
+        self.assertEqual(response.status, 200)
+        self.assertEqual(response.read(), b"firebase-helper")
+
+        conn.request(
+            "POST",
+            "/__/auth/handler",
+            body="state=abc",
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+        )
+        response = conn.getresponse()
+        self.assertEqual(response.status, 200)
+        self.assertEqual(response.read(), b"firebase-helper")
+
+        self.assertEqual(
+            calls,
+            [
+                ("GET", "/__/auth/handler", "apiKey=test"),
+                ("POST", "/__/auth/handler", ""),
+            ],
+        )
+
     def test_google_start_reports_missing_env_with_fix_hint(self):
         self.set_env(GOOGLE_CLIENT_ID=None, GOOGLE_CLIENT_SECRET=None, REDIRECT_URI=None)
 
