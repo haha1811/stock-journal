@@ -20,5 +20,11 @@
     return match ? String(match.name).trim() : "";
   }
 
-  return { findKnownStockName };
+  function shouldAutoFillStockName(currentName, knownName) {
+    const normalizedCurrentName = String(currentName || "").trim();
+    const normalizedKnownName = String(knownName || "").trim();
+    return Boolean(normalizedKnownName) && normalizedCurrentName !== normalizedKnownName;
+  }
+
+  return { findKnownStockName, shouldAutoFillStockName };
 });

@@ -45,6 +45,26 @@ class FrontendHelpersTestCase(unittest.TestCase):
         self.assertEqual(payload["missing"], "")
         self.assertEqual(payload["blankName"], "")
 
+    def test_should_auto_fill_stock_name_replaces_stale_existing_value(self):
+        script = textwrap.dedent(
+            """
+            const { shouldAutoFillStockName } = require("./app-helpers.js");
+            console.log(JSON.stringify({
+              empty: shouldAutoFillStockName("", "凱基台灣 TOP 50"),
+              stale: shouldAutoFillStockName("富邦科技", "凱基台灣 TOP 50"),
+              same: shouldAutoFillStockName("凱基台灣 TOP 50", "凱基台灣 TOP 50"),
+              missingKnownName: shouldAutoFillStockName("富邦科技", ""),
+            }));
+            """
+        )
+
+        payload = json.loads(self.run_node(script))
+
+        self.assertTrue(payload["empty"])
+        self.assertTrue(payload["stale"])
+        self.assertFalse(payload["same"])
+        self.assertFalse(payload["missingKnownName"])
+
 
 if __name__ == "__main__":
     unittest.main()
