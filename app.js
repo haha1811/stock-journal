@@ -165,7 +165,7 @@ function autoFillStockName() {
     return;
   }
 
-  if (!currentName || state.stockNameAutoFilled) {
+  if (StockJournalHelpers.shouldAutoFillStockName(currentName, knownName)) {
     form.name.value = knownName;
     state.stockNameAutoFilled = true;
   }
