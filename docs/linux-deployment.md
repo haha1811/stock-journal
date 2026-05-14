@@ -128,6 +128,10 @@ http://<你的 Linux 主機 IP>:8000
 your-domain.example {
     encode zstd gzip
 
+    header Cache-Control no-store
+    header Pragma no-cache
+    header Expires 0
+
     handle /__/auth/* {
         reverse_proxy 127.0.0.1:8000
     }
@@ -143,6 +147,8 @@ your-domain.example {
     }
 }
 ```
+
+`Cache-Control: no-store` 是為了避免瀏覽器沿用舊版 `app.js` 或 `app-helpers.js`。若前端行為已更新，但使用者重新整理後仍看到舊行為，通常要先確認 Caddy 回應前端靜態檔時是否帶有 no-cache/no-store header。
 
 自訂網域使用 Firebase Auth 時，`.env` 建議設定：
 
@@ -184,4 +190,18 @@ cp /opt/stock-journal/data/stock-records.sqlite3 /opt/stock-journal/data/stock-r
 cd /opt/stock-journal
 git pull
 sudo systemctl restart stock-journal
+```
+
+更新後可用以下指令確認前端靜態檔不會被瀏覽器保留舊版：
+
+```bash
+curl -I https://your-domain.example/app.js
+```
+
+回應應包含：
+
+```text
+Cache-Control: no-store
+Pragma: no-cache
+Expires: 0
 ```
