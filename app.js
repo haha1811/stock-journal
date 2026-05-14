@@ -43,6 +43,7 @@ const state = {
   trades: [],
   editingTradeId: null,
   editingAccountId: null,
+  stockNameAutoFilled: false,
   tradeSort: loadTradeSortState(),
 };
 
@@ -152,6 +153,24 @@ function getLegacyTrades() {
   }
 }
 
+function autoFillStockName() {
+  const knownName = StockJournalHelpers.findKnownStockName(state.trades, form.symbol.value);
+  const currentName = form.name.value.trim();
+
+  if (!knownName) {
+    if (state.stockNameAutoFilled) {
+      form.name.value = "";
+      state.stockNameAutoFilled = false;
+    }
+    return;
+  }
+
+  if (!currentName || state.stockNameAutoFilled) {
+    form.name.value = knownName;
+    state.stockNameAutoFilled = true;
+  }
+}
+
 function populateForm(trade) {
   form.settlement.value = trade.settlement;
   form.side.value = trade.side;
@@ -164,6 +183,7 @@ function populateForm(trade) {
   form.fee.value = trade.fee;
   form.tax.value = trade.tax;
   form.note.value = trade.note || "";
+  state.stockNameAutoFilled = false;
   renderPreview();
 }
 
@@ -540,6 +560,7 @@ function resetAccountForm() {
 function resetForm() {
   clearEditingState();
   form.reset();
+  state.stockNameAutoFilled = false;
   form.quantity.value = 1000;
   form.fee.value = 0;
   form.tax.value = 0;
@@ -640,6 +661,11 @@ form.addEventListener("submit", (event) => {
 });
 
 form.addEventListener("input", renderPreview);
+form.symbol.addEventListener("input", autoFillStockName);
+form.symbol.addEventListener("change", autoFillStockName);
+form.name.addEventListener("input", () => {
+  state.stockNameAutoFilled = false;
+});
 yearFilter.addEventListener("change", renderTable);
 accountFilter.addEventListener("change", () => {
   renderYearOptions();
