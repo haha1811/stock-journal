@@ -52,6 +52,7 @@ PUBLIC_PATHS = {
     "/api/auth/logout",
     "/login.html",
     "/auth.js",
+    "/app-helpers.js",
     "/firebase-auth-bridge.js",
     "/styles.css",
     "/favicon.ico",
@@ -68,6 +69,7 @@ STATIC_FILES = {
     "/favicon.ico": "favicon.ico",
     "/app.js": "app.js",
     "/auth.js": "auth.js",
+    "/app-helpers.js": "app-helpers.js",
     "/firebase-auth-bridge.js": "firebase-auth-bridge.js",
 
     "/dividend-calendar.js": "dividend-calendar.js",

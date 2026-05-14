@@ -138,6 +138,12 @@ class AuthTestCase(unittest.TestCase):
         auth_js = response.read().decode("utf-8")
         self.assertIn("aria-busy", auth_js)
 
+        conn.request("GET", "/app-helpers.js")
+        response = conn.getresponse()
+        self.assertEqual(response.status, 200)
+        app_helpers_js = response.read().decode("utf-8")
+        self.assertIn("findKnownStockName", app_helpers_js)
+
         self.set_env(
             GOOGLE_CLIENT_ID="client-123.apps.googleusercontent.com",
             GOOGLE_CLIENT_SECRET="secret-123",
